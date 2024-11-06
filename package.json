@@ -1,0 +1,19 @@
+{
+  "name": "b-spline-js",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^5.4.10",
+    "xo": "^0.59.3"
+  },
+  "dependencies": {
+    "lil-gui": "^0.20.0"
+  }
+}
