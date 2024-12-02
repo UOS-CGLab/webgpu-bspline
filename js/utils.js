@@ -1,4 +1,4 @@
-import { canvas, square } from "./config";
+import { ctrl, bspline, canvas, square } from "./config";
 
 export function createSquareVertex(x, y, offset) {
   // 각 제어점은 xy 좌표를 가짐
@@ -25,4 +25,20 @@ export function createSquareVertex(x, y, offset) {
   addVertex(x + offset, y + offset);
 
   return vertexData;
+}
+
+export function calcKnotVector() {
+  const totalKnotNum = ctrl.len + bspline.degree + 1;
+  const knotVector = [];
+  for (let i = 0; i < totalKnotNum; i++) {
+    if (i < bspline.degree) {
+      knotVector.push(0);
+    } else if (i <= ctrl.len) {
+      knotVector.push(i - bspline.degree + 1);
+    } else if (i > ctrl.len) {
+      knotVector.push(ctrl.len - bspline.degree + 2);
+    }
+  }
+
+  return knotVector;
 }
