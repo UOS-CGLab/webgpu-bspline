@@ -1,21 +1,6 @@
 import { ctrl, circle, bspline } from "./config";
 import Vector from "./vector";
-
-function calcKnotVector() {
-  const totalKnotNum = ctrl.len + bspline.degree + 1;
-  const knotVector = [];
-  for (let i = 0; i < totalKnotNum; i++) {
-    if (i < bspline.degree) {
-      knotVector.push(0);
-    } else if (i <= ctrl.len) {
-      knotVector.push(i - bspline.degree + 1);
-    } else if (i > ctrl.len) {
-      knotVector.push(ctrl.len - bspline.degree + 2);
-    }
-  }
-
-  return knotVector;
-}
+import { calcKnotVector } from "./utils";
 
 export async function calcUV(device, circlePoints) {
   const gridStart = ctrl.start;
@@ -30,7 +15,7 @@ export async function calcUV(device, circlePoints) {
     code: /* wgsl */ `
     const controlPointLen: u32 = ${ctrl.len}; // 가로, 세로 모두 제어점의 개수가 동일함
     const degree: u32 = ${bspline.degree}; // 기저 함수 방정식의 차수
-    const knotVectorLen: u32 = ${ctrl.len + bspline.degree + 1}; // 9 + 3 + 1 = 13
+    const knotVectorLen: u32 = ${knotVector.length}; // ctrl.len + bspline.degree + 1 = 13
     const circlePointNum: u32 = ${circle.total}; // 원의 점의 총 개수
     const gridStart: vec2f = vec2f(${gridStart.x}, ${gridStart.y});
     const gridEnd: vec2f = vec2f(${gridEnd.x}, ${gridEnd.y});
@@ -39,7 +24,6 @@ export async function calcUV(device, circlePoints) {
     // uniform에는 16바이트, 여기에선 vec4f의 형식만 사용가능
     @group(0) @binding(0) var<uniform> circlePoints: array<vec4f, circlePointNum>;
     @group(0) @binding(1) var<storage, read_write> uvResult: array<vec2f, circlePointNum>;
-
 
     @compute @workgroup_size(circlePointNum, 1, 1)
     fn main (
