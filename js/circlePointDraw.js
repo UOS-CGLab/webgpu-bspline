@@ -1,12 +1,13 @@
 import { createSquareVertex } from "./utils";
-import { circle, square } from "./config";
-import { calcUV } from "./compute";
+import { circle, square, canvas } from "./config";
+import { calcUV } from "./computeUV";
 import Vector from "./vector";
 
 export class CirclePoints {
   constructor() {
     this.initPoints = [];
-    this.pointValue = null;
+    this.pointsVertexValue = null;
+    this.pointsValue = null;
     this.uvValue = null;
 
     for (let i = 0; i < circle.total; i++) {
@@ -19,13 +20,25 @@ export class CirclePoints {
       this.initPoints.push(new Vector(x, y));
     }
 
-    this.createPointValue();
+    this.createPointsValue();
+    this.createPointsVertexValue();
   }
 
-  createPointValue() {
+  createPointsValue() {
+    const pointUnitSize = 2 * 4; // 2개의 32bit(4) float
+    const pointBufferSize = pointUnitSize * circle.total;
+    this.pointsValue = new Float32Array(pointBufferSize / 4);
+
+    for (let i = 0; i < circle.total; i++) {
+      this.pointsValue[i * 2] = this.initPoints[i].x / canvas.width;
+      this.pointsValue[i * 2 + 1] = this.initPoints[i].y / canvas.height;
+    }
+  }
+
+  createPointsVertexValue() {
     const pointUnitSize = square.vertNum * 2 * 4; // 6개의 정점, 2개의 32bit(4) float
     const pointBufferSize = pointUnitSize * circle.total;
-    this.pointValues = new Float32Array(pointBufferSize / 4);
+    this.pointsVertexValue = new Float32Array(pointBufferSize / 4);
 
     for (let i = 0; i < circle.total; i++) {
       const vertexData = createSquareVertex(
@@ -34,7 +47,7 @@ export class CirclePoints {
         circle.size
       );
       const offset = (i * pointUnitSize) / 4;
-      this.pointValues.set(vertexData, offset);
+      this.pointsVertexValue.set(vertexData, offset);
     }
   }
 
