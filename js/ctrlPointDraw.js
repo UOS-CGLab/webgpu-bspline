@@ -7,7 +7,8 @@ export class CtrlPoints {
     this.initPoints = [];
     this.points = [];
     this.offsets = [];
-    this.pointValues = null;
+    this.pointsValue = null;
+    this.pointsVertexValue = null;
 
     for (let i = 0; i < ctrl.len; i++) {
       for (let j = 0; j < ctrl.len; j++) {
@@ -19,19 +20,12 @@ export class CtrlPoints {
       }
     }
 
-    this.createPointValue();
+    this.createPointsValue();
+    this.createPointsVertexValue();
   }
 
   getPointFromIdx(vecArr, xIdx, yIdx) {
     return vecArr[yIdx * ctrl.len + xIdx];
-  }
-
-  getOffsetFromIdx(xIdx, yIdx) {
-    return this.offsets[yIdx * ctrl.len + xIdx];
-  }
-
-  setOffsetFromIdx(xIdx, yIdx, offset) {
-    this.offsets[yIdx * ctrl.len + xIdx] = offset;
   }
 
   setPointFromIdx(xIdx, yIdx) {
@@ -42,7 +36,15 @@ export class CtrlPoints {
     point.y = initPoint.y + offset.y;
   }
 
-  updatePointValue(xIdx, yIdx) {
+  getOffsetFromIdx(xIdx, yIdx) {
+    return this.offsets[yIdx * ctrl.len + xIdx];
+  }
+
+  setOffsetFromIdx(xIdx, yIdx, offset) {
+    this.offsets[yIdx * ctrl.len + xIdx] = offset;
+  }
+
+  updatePointsVertexValue(xIdx, yIdx) {
     const pointUnitSize = square.vertNum * 2 * 4; // 6개의 정점, 2개의 32bit(4) float
     const vertexData = createSquareVertex(
       this.points[yIdx * ctrl.len + xIdx].x,
@@ -50,14 +52,14 @@ export class CtrlPoints {
       ctrl.size
     );
     const offset = ((yIdx * ctrl.len + xIdx) * pointUnitSize) / 4;
-    this.pointValues.set(vertexData, offset);
+    this.pointsVertexValue.set(vertexData, offset);
   }
 
-  createPointValue() {
+  createPointsVertexValue() {
     const pointUnitSize = square.vertNum * 2 * 4; // 6개의 정점, 2개의 32bit(4) float
     const pointBufferSize = pointUnitSize * ctrl.total;
 
-    this.pointValues = new Float32Array(pointBufferSize / 4);
+    this.pointsVertexValue = new Float32Array(pointBufferSize / 4);
 
     for (let i = 0; i < this.points.length; i++) {
       const vertexData = createSquareVertex(
@@ -66,7 +68,26 @@ export class CtrlPoints {
         ctrl.size
       );
       const offset = (i * pointUnitSize) / 4;
-      this.pointValues.set(vertexData, offset);
+      this.pointsVertexValue.set(vertexData, offset);
+    }
+  }
+
+  updatePointsValue(yIdx, xIdx) {
+    const pointUnitSize = 2 * 4;
+    const pointData = new Float32Array(pointUnitSize);
+    const offset = (yIdx * ctrl.len + xIdx) * pointUnitSize;
+    this.pointsVertexValue.set(pointData, offset);
+  }
+
+  createPointsValue() {
+    const pointUnitSize = 2 * 4;
+    const pointBufferSize = pointUnitSize * ctrl.total;
+
+    this.pointsValue = new Float32Array(pointBufferSize / 4);
+    for (let i = 0; i < this.points.lenght; i++) {
+      const offset = i * pointUnitSize;
+      this.pointsValue[offset] = this.points[i].x;
+      this.pointsValue[offset + 1] = this.points[i].y;
     }
   }
 }
