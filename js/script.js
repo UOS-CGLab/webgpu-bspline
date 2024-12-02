@@ -1,56 +1,11 @@
 import { CtrlPoints, ctrlPointDraw } from "./ctrlPointDraw";
 import { CirclePoints, circlePointDraw } from "./circlePointDraw";
-import { ctrl } from "./config";
-import GUI from "lil-gui";
-import Vector from "./vector";
+import { controlGUI } from "./gui";
+
+import { calcBlend } from "./computeBlend";
 
 async function main() {
-  const gui = new GUI();
-  const obj = {
-    xCtrl: 3,
-    yCtrl: 3,
-    xOffset: 0,
-    yOffset: 0,
-  };
-
-  gui.add(obj, "xCtrl", [1, 2, 3, 4, 5, 6, 7, 8, 9]).onChange((value) => {
-    const offset = ctrlPoints.getOffsetFromIdx(value - 1, obj.yCtrl - 1);
-    obj.xOffset = offset.x;
-    obj.yOffset = offset.y;
-    gui.controllers[2].updateDisplay();
-    gui.controllers[3].updateDisplay();
-  });
-  gui.add(obj, "yCtrl", [1, 2, 3, 4, 5, 6, 7, 8, 9]).onChange((value) => {
-    const offset = ctrlPoints.getOffsetFromIdx(value - 1, obj.yCtrl - 1);
-    obj.xOffset = offset.x;
-    obj.yOffset = offset.y;
-    gui.controllers[2].updateDisplay();
-    gui.controllers[3].updateDisplay();
-  });
-  gui
-    .add(obj, "xOffset", -ctrl.gap + 10, ctrl.gap - 10, 1)
-    .onChange((value) => {
-      ctrlPoints.setOffsetFromIdx(
-        obj.xCtrl - 1,
-        obj.yCtrl - 1,
-        new Vector(value, obj.yOffset)
-      );
-      ctrlPoints.setPointFromIdx(obj.xCtrl - 1, obj.yCtrl - 1);
-      ctrlPoints.updatePointValue(obj.xCtrl - 1, obj.yCtrl - 1);
-      render();
-    });
-  gui
-    .add(obj, "yOffset", -ctrl.gap + 10, ctrl.gap - 10, 1)
-    .onChange((value) => {
-      ctrlPoints.setOffsetFromIdx(
-        obj.xCtrl - 1,
-        obj.yCtrl - 1,
-        new Vector(obj.xOffset, value)
-      );
-      ctrlPoints.setPointFromIdx(obj.xCtrl - 1, obj.yCtrl - 1);
-      ctrlPoints.updatePointValue(obj.xCtrl - 1, obj.yCtrl - 1);
-      render();
-    });
+  const ctrlGUI = new controlGUI();
 
   // adapter와 device를 얻음
   const adapter = await navigator.gpu?.requestAdapter();
@@ -72,8 +27,12 @@ async function main() {
 
   const ctrlPoints = new CtrlPoints();
   const circlePoints = new CirclePoints(device);
+
+  ctrlGUI.init(ctrlPoints);
+
   await circlePoints.createUVValue(device);
-  console.log(circlePoints.uvValue);
+  // console.log(circlePoints.uvValue);
+  await calcBlend(device, circlePoints.pointsValue, circlePoints.uvValue);
 
   const squareDrawFunc = ctrlPointDraw(device, presentationFormat);
   const circleDrawFunc = circlePointDraw(device, presentationFormat);
@@ -99,8 +58,8 @@ async function main() {
 
     const encoder = device.createCommandEncoder({ label: "our encoder" });
     const pass = encoder.beginRenderPass(renderPassDescriptor);
-    squareDrawFunc(pass, ctrlPoints.pointValues);
-    circleDrawFunc(pass, circlePoints.pointValues);
+    squareDrawFunc(pass, ctrlPoints.pointsVertexValue);
+    circleDrawFunc(pass, circlePoints.pointsValue);
 
     // 다른 pipeline도 설정하기
     pass.end();
