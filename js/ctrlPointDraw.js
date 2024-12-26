@@ -84,11 +84,11 @@ export class CtrlPoints {
     const pointBufferSize = pointUnitSize * ctrl.total;
 
     this.pointsValue = new Float32Array(pointBufferSize / 4);
-    for (let i = 0; i < this.points.lenght; i++) {
-      const offset = i * pointUnitSize;
-      this.pointsValue[offset] = this.points[i].x;
-      this.pointsValue[offset + 1] = this.points[i].y;
-    }
+    this.points.forEach((point, index) => {
+      // const offset = index * pointUnitSize;
+      this.pointsValue[index * 2] = point.x;
+      this.pointsValue[index * 2 + 1] = point.y;
+    });
   }
 }
 
