@@ -1,13 +1,16 @@
 import { createSquareVertex } from "./utils";
 import { circle, square, canvas } from "./config";
-import { calcUV } from "./computeUV";
+import calcUV from "./computeUV";
+import calcBlend from "./computeBlend";
+import calcSum from "./computeSum";
 import Vector from "./vector";
 
 export class CirclePoints {
   constructor() {
     this.initPoints = [];
     this.pointsVertexValue = null;
-    this.pointsValue = null;
+    this.initPointsValue = null;
+    this.pointsValue = [];
     this.uvValue = null;
 
     for (let i = 0; i < circle.total; i++) {
@@ -27,25 +30,34 @@ export class CirclePoints {
   createPointsValue() {
     const pointUnitSize = 2 * 4; // 2개의 32bit(4) float
     const pointBufferSize = pointUnitSize * circle.total;
-    this.pointsValue = new Float32Array(pointBufferSize / 4);
+    this.initPointsValue = new Float32Array(pointBufferSize / 4);
 
     for (let i = 0; i < circle.total; i++) {
-      this.pointsValue[i * 2] = this.initPoints[i].x / canvas.width;
-      this.pointsValue[i * 2 + 1] = this.initPoints[i].y / canvas.height;
+      this.initPointsValue[i * 2] = this.initPoints[i].x;
+      this.initPointsValue[i * 2 + 1] = this.initPoints[i].y;
     }
   }
 
-  createPointsVertexValue() {
+  createPointsVertexValue(init = true) {
     const pointUnitSize = square.vertNum * 2 * 4; // 6개의 정점, 2개의 32bit(4) float
     const pointBufferSize = pointUnitSize * circle.total;
     this.pointsVertexValue = new Float32Array(pointBufferSize / 4);
 
     for (let i = 0; i < circle.total; i++) {
-      const vertexData = createSquareVertex(
-        this.initPoints[i].x,
-        this.initPoints[i].y,
-        circle.size
-      );
+      let vertexData;
+      if (init) {
+        vertexData = createSquareVertex(
+          this.initPoints[i].x,
+          this.initPoints[i].y,
+          circle.size
+        );
+      } else {
+        vertexData = createSquareVertex(
+          this.pointsValue[i].x,
+          this.pointsValue[i].y,
+          circle.size
+        );
+      }
       const offset = (i * pointUnitSize) / 4;
       this.pointsVertexValue.set(vertexData, offset);
     }
@@ -53,6 +65,27 @@ export class CirclePoints {
 
   async createUVValue(device) {
     this.uvValue = await calcUV(device, this.initPoints);
+  }
+
+  async updatePointsValue(device, controlPoints) {
+    const blendResult = await calcBlend(
+      device,
+      this.initPointsValue,
+      this.uvValue
+    );
+    const pointsResult = await calcSum(
+      device,
+      controlPoints,
+      this.uvValue,
+      blendResult
+    );
+    for (let i = 0; i < circle.total; i++) {
+      this.pointsValue[i] = new Vector(
+        pointsResult[i * 2],
+        pointsResult[i * 2 + 1]
+      );
+    }
+    this.createPointsVertexValue(false);
   }
 }
 
