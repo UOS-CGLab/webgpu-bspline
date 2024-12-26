@@ -2,8 +2,6 @@ import { CtrlPoints, ctrlPointDraw } from "./ctrlPointDraw";
 import { CirclePoints, circlePointDraw } from "./circlePointDraw";
 import { controlGUI } from "./gui";
 
-import { calcBlend } from "./computeBlend";
-
 async function main() {
   const ctrlGUI = new controlGUI();
 
@@ -32,7 +30,7 @@ async function main() {
 
   await circlePoints.createUVValue(device);
   // console.log(circlePoints.uvValue);
-  await calcBlend(device, circlePoints.pointsValue, circlePoints.uvValue);
+  await circlePoints.updatePointsValue(device, ctrlPoints.pointsValue);
 
   const squareDrawFunc = ctrlPointDraw(device, presentationFormat);
   const circleDrawFunc = circlePointDraw(device, presentationFormat);
@@ -59,7 +57,7 @@ async function main() {
     const encoder = device.createCommandEncoder({ label: "our encoder" });
     const pass = encoder.beginRenderPass(renderPassDescriptor);
     squareDrawFunc(pass, ctrlPoints.pointsVertexValue);
-    circleDrawFunc(pass, circlePoints.pointsValue);
+    circleDrawFunc(pass, circlePoints.pointsVertexValue);
 
     // 다른 pipeline도 설정하기
     pass.end();
