@@ -1,6 +1,7 @@
 import GUI from "lil-gui";
 import { ctrl } from "./config";
 import Vector from "./vector";
+import { ctrlPointDraw } from "./ctrlPointDraw";
 
 export class controlGUI {
   constructor() {
@@ -11,6 +12,7 @@ export class controlGUI {
       xOffset: 0,
       yOffset: 0,
     };
+    this.render = null;
   }
 
   init(ctrlPoints) {
@@ -49,8 +51,8 @@ export class controlGUI {
           new Vector(value, this.obj.yOffset)
         );
         ctrlPoints.setPointFromIdx(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
-        ctrlPoints.updatePointValue(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
-        render();
+        ctrlPoints.updatePointsValue(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
+        this.render();
       });
     this.gui
       .add(this.obj, "yOffset", -ctrl.gap + 10, ctrl.gap - 10, 1)
@@ -61,8 +63,8 @@ export class controlGUI {
           new Vector(this.obj.xOffset, value)
         );
         ctrlPoints.setPointFromIdx(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
-        ctrlPoints.updatePointValue(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
-        render();
+        ctrlPoints.updatePointsValue(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
+        this.render();
       });
   }
 }

@@ -15,7 +15,7 @@ export const ctrl = {
 
 export const circle = {
   total: 100,
-  center: new Vector(400, 300),
+  center: new Vector(375, 275),
   radius: 125,
   size: Math.floor(5 / 2), // 5x5 사각형을 만들기 위한 오프셋
 };

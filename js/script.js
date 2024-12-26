@@ -3,8 +3,6 @@ import { CirclePoints, circlePointDraw } from "./circlePointDraw";
 import { controlGUI } from "./gui";
 
 async function main() {
-  const ctrlGUI = new controlGUI();
-
   // adapter와 device를 얻음
   const adapter = await navigator.gpu?.requestAdapter();
   const device = await adapter?.requestDevice();
@@ -26,7 +24,9 @@ async function main() {
   const ctrlPoints = new CtrlPoints();
   const circlePoints = new CirclePoints(device);
 
+  const ctrlGUI = new controlGUI();
   ctrlGUI.init(ctrlPoints);
+  ctrlGUI.render = render;
 
   await circlePoints.createUVValue(device);
   // console.log(circlePoints.uvValue);

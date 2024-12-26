@@ -2,6 +2,7 @@ import { ctrl, bspline, circle } from "./config";
 import { calcKnotVector } from "./utils";
 
 export default async function calcBlend(device, circlePoints, circleUV) {
+  console.log(circlePoints);
   const knotVector = calcKnotVector();
 
   const module = device.createShaderModule({
@@ -32,7 +33,7 @@ export default async function calcBlend(device, circlePoints, circleUV) {
     fn calcBlend(i: u32, t: f32) -> f32 {
       // k = degree
       // u = knotVector
-      // 임의로 충분히 큰 크기(여기에서는 20)의 배열을 생성함
+      // 임의로 충분히 큰 크기(여기에서는 10)의 배열을 생성함
       var degArr: array<f32, 10>;
       var idx: u32 = 0u;
       for (var deg: u32 = 1u; deg < degree + 1u; deg++) {
@@ -82,13 +83,12 @@ export default async function calcBlend(device, circlePoints, circleUV) {
     ) {
       let i: u32 = u32(local_invocation_id.x); // control point idx
       let idx: u32 = u32(workgroup_id.x); // circle point idx
-      let x: f32 = (circlePoints[idx].x - 400) / 400;
-      let y: f32 = (circlePoints[idx].y - 300) / 300;
-      let circleX: f32 = calcBlend(i, x);
-      let circleY: f32 = calcBlend(i, y);
+
+      let circleX: f32 = calcBlend(i, circleUV[idx].x);
+      let circleY: f32 = calcBlend(i, circleUV[idx].y);
       // let temp: vec2f = vec2f(global_invocation_id.xy);
       // blendResult[idx * controlPointLen + i] = temp; 
-      blendResult[idx * controlPointLen + i] = vec2f(x, y);
+      blendResult[idx * controlPointLen + i] = vec2f(circleX, circleY);
     }
     `,
   });
@@ -185,6 +185,6 @@ export default async function calcBlend(device, circlePoints, circleUV) {
   await resultBuffer.mapAsync(GPUMapMode.READ);
   const blend = new Float32Array(resultBuffer.getMappedRange());
   // resultBuffer.unmap();
-  // console.log(blend);
+  console.log(blend);
   return blend;
 }
