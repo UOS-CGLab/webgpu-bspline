@@ -1,4 +1,3 @@
-
 enum SquareType {
 	Ctrl, Circle,
 }
