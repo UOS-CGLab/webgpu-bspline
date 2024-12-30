@@ -3,7 +3,7 @@ import { ctrl } from "./config";
 
 export abstract class ControlGUI {
   static gui = new GUI();
-  static obj: Record<string, number> = {
+  static obj = {
     xCtrl: 3,
     yCtrl: 3,
     xOffset: 0,
@@ -35,7 +35,7 @@ export abstract class ControlGUI {
     //   this.gui.controllers[3].updateDisplay();
     // });
 
-    this.gui.add(this.obj, "xOffset", -ctrl.gap + 10, ctrl.gap - 10, 1);
+    ControlGUI.gui.add(this.obj, "xOffset", -ctrl.gap + 10, ctrl.gap - 10, 1);
     // .onChange((value) => {
     //   ctrlPoints.setOffsetFromIdx(
     //     this.obj.xCtrl - 1,
@@ -46,7 +46,7 @@ export abstract class ControlGUI {
     //   ctrlPoints.updatePointsValue(this.obj.xCtrl - 1, this.obj.yCtrl - 1);
     //   this.render();
     // });
-    this.gui.add(this.obj, "yOffset", -ctrl.gap + 10, ctrl.gap - 10, 1);
+    ControlGUI.gui.add(this.obj, "yOffset", -ctrl.gap + 10, ctrl.gap - 10, 1);
     // .onChange((value) => {
     //   ctrlPoints.setOffsetFromIdx(
     //     this.obj.xCtrl - 1,
