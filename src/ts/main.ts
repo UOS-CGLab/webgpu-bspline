@@ -3,6 +3,7 @@ import {ctrlPoint} from './ctrlPoint';
 import {SquareType} from './types/types';
 import {listToSquareVertex} from './webgpu/arrayCalculation';
 import drawSquares from './webgpu/drawSquare';
+import computeCurrentCirclePos from './webgpu/compute';
 import {changeControlPoint, moveControlPoint, releaseControlPoint} from './interaction';
 
 // Adapter와 device를 얻음
@@ -38,15 +39,19 @@ const renderPassDescriptor = {
 	],
 };
 
-render();
+await render();
 
-function render() {
+async function render() {
 	if (!device) {
 		throw new Error('Need a browser that supports WebGPU');
 	}
 
 	const ctrlPointVertexArray = listToSquareVertex(ctrlPoint.current, SquareType.Ctrl);
-	const drawSquaresFunc = drawSquares(device, presentationFormat, ctrlPointVertexArray);
+	const drawControlFunc = drawSquares(device, presentationFormat, ctrlPointVertexArray, SquareType.Ctrl);
+	const currentCirclePos = await computeCurrentCirclePos(device);
+	// Const circlePointVertexArray = listToSquareVertex(circlePoint.current, SquareType.Circle);
+	const circlePointVertexArray = listToSquareVertex(currentCirclePos, SquareType.Circle);
+	const drawCircleFunc = drawSquares(device, presentationFormat, circlePointVertexArray, SquareType.Circle);
 
 	renderPassDescriptor.colorAttachments[0].view = context
 		.getCurrentTexture()
@@ -54,7 +59,8 @@ function render() {
 
 	const encoder = device.createCommandEncoder({label: 'our encoder'});
 	const pass = encoder.beginRenderPass(renderPassDescriptor);
-	drawSquaresFunc(pass, ctrlPointVertexArray);
+	drawControlFunc(pass, ctrlPointVertexArray);
+	drawCircleFunc(pass, circlePointVertexArray);
 
 	// 다른 pipeline도 설정하기
 	pass.end();
