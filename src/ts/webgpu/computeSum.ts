@@ -1,4 +1,4 @@
-import {ctrl, bspline, circle} from '../config';
+import {ctrl, circle} from '../config';
 import {ctrlPoint} from '../ctrlPoint';
 import {listToArray} from './arrayCalculation';
 
@@ -11,14 +11,11 @@ export default async function computeSum(
 		label: 'sum calculation compute shader',
 		code: /* wgsl */ `
     const controlPointLen: u32 = ${ctrl.len}; // 가로, 세로 모두 제어점의 개수가 동일함
-    const degree: u32 = ${bspline.degree}; // 기저 함수 방정식의 차수
-    const knotVectorLen: u32 = controlPointLen - 1 + degree + 1; // 9 - 1 + 3 + 1 = 12
     const circlePointNum: u32 = ${circle.total}; // 원의 점의 총 개수
     const blendLen: u32 = circlePointNum * controlPointLen;
-    const ctrlPtMatrixLen = controlPointLen * controlPointLen;
   
     // 동적 배열 선언이 안 되기에 필요한 입력 값들을 shader 외부에서 생성한 다음에 binding group으로 보내줌
-    @group(0) @binding(0) var<storage, read> controlPoints: array<vec2f, ctrlPtMatrixLen>;
+    @group(0) @binding(0) var<storage, read> controlPoints: array<vec2f, controlPointLen * controlPointLen>;
     @group(0) @binding(1) var<storage, read> circleUV: array<vec2f, circlePointNum>;
     @group(0) @binding(2) var<storage, read> blendResult: array<vec2f, circlePointNum * controlPointLen>;
     @group(0) @binding(3) var<storage, read_write> pointResult: array<vec2f, circlePointNum>;
