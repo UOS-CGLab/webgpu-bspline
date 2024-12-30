@@ -33,7 +33,7 @@ export const circle = {
 	/** 원을 표현하는 점의 총 개수 */
 	total: 100,
 	/** 원의 중심점 */
-	center: new Vector(400, 300),
+	center: new Vector(400 - 25, 300 - 25), // TODO: 임시로 원의 중심을 이동한 상태.
 	/** 원의 반지름 */
 	radius: 125,
 	/** Canvas에 그려지는 점의 크기 */
