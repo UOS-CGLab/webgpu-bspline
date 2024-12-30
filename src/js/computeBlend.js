@@ -127,7 +127,7 @@ export default async function calcBlend(device, circlePoints, circleUV) {
 
   const circlePointBuffer = device.createBuffer({
     size: circle.total * 2 * 4, // 32bit vec4f형태기 때문에 4 * 4
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 
     mappedAtCreation: true,
   });
   new Float32Array(circlePointBuffer.getMappedRange()).set(circlePoints);
