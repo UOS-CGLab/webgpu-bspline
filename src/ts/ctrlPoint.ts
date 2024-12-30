@@ -1,5 +1,5 @@
-import Vector from './vector.ts';
-import {ctrl} from './config.ts';
+import Vector from './vector';
+import {ctrl} from './config';
 
 const ctrlPoint = {
 	init: [] as Vector[],
