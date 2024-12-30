@@ -5,6 +5,7 @@ import {listToSquareVertex} from './webgpu/arrayCalculation';
 import drawSquares from './webgpu/drawSquare';
 import computeCurrentCirclePos from './webgpu/compute';
 import {changeControlPoint, moveControlPoint, releaseControlPoint} from './interaction';
+import {circlePoint} from './circlePoint';
 
 // Adapter와 device를 얻음
 const adapter = await navigator.gpu?.requestAdapter();
@@ -48,9 +49,8 @@ async function render() {
 
 	const ctrlPointVertexArray = listToSquareVertex(ctrlPoint.current, SquareType.Ctrl);
 	const drawControlFunc = drawSquares(device, presentationFormat, ctrlPointVertexArray, SquareType.Ctrl);
-	const currentCirclePos = await computeCurrentCirclePos(device);
-	// Const circlePointVertexArray = listToSquareVertex(circlePoint.current, SquareType.Circle);
-	const circlePointVertexArray = listToSquareVertex(currentCirclePos, SquareType.Circle);
+	circlePoint.current = await computeCurrentCirclePos(device);
+	const circlePointVertexArray = listToSquareVertex(circlePoint.current, SquareType.Circle);
 	const drawCircleFunc = drawSquares(device, presentationFormat, circlePointVertexArray, SquareType.Circle);
 
 	renderPassDescriptor.colorAttachments[0].view = context
