@@ -1,6 +1,9 @@
 import {square} from '../config';
+import {SquareType} from '../types/types';
 
-export default function drawSquares(device: GPUDevice, presentationFormat: GPUTextureFormat, pointArray: Float32Array) {
+export default function drawSquares(device: GPUDevice, presentationFormat: GPUTextureFormat, pointArray: Float32Array, squareType: SquareType) {
+	const squareColor = squareType === SquareType.Ctrl ? [1, 0, 0, 1] : [0, 1, 0, 1];
+	const squareColorString = squareColor.join('.0, ');
 	const module = device.createShaderModule({
 		label: 'control point drawing shader',
 		code: /* wgsl */ `
@@ -15,7 +18,7 @@ export default function drawSquares(device: GPUDevice, presentationFormat: GPUTe
 		}
 
 		@fragment fn fs() -> @location(0) vec4f {
-			return vec4f(1.0, 0.0, 0.0, 1.0);
+			return vec4f(${squareColorString});
 		}
 	`,
 	});
