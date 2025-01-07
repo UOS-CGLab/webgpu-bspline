@@ -1,4 +1,3 @@
-import '../css/style.css';
 import {ctrlPoint} from './ctrlPoint';
 import {SquareType} from './types/types';
 import {listToSquareVertex} from './webgpu/arrayCalculation';
