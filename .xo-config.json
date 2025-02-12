@@ -5,6 +5,7 @@
     "n/file-extension-in-import": 0,
     "no-alert": 0,
     "typescript/no-unsafe-assignment": 0,
-    "import/extensions": 0
+    "import/extensions": 0,
+    "capitalized-comments": 0
   }
 }
