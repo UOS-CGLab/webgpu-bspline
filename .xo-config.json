@@ -6,6 +6,8 @@
     "no-alert": 0,
     "typescript/no-unsafe-assignment": 0,
     "import/extensions": 0,
-    "capitalized-comments": 0
+    "capitalized-comments": 0,
+    "no-bitwise": 0,
+    "no-mixed-operators": 0
   }
 }
