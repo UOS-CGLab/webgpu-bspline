@@ -8,3 +8,7 @@ export const canvas = {
 	height: 600,
 } as const;
 
+export const cube = {
+	girdSize: 15,
+	/** 큐브의 크기 */
+} as const;

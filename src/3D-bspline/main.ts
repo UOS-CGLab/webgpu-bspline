@@ -1,5 +1,6 @@
 import {mat4, utils} from 'wgpu-matrix';
-import {canvas} from './config';
+import {canvas, cube} from './config';
+import Point from './point';
 
 // Adapter와 device를 얻음
 const adapter = await navigator.gpu?.requestAdapter();
@@ -88,19 +89,12 @@ const uniformBufferSize = (16) * 4;
 const uniformBuffer = device.createBuffer({
 	label: 'uniforms',
 	size: uniformBufferSize,
-	// eslint-disable-next-line no-bitwise
 	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 const uniformValues = new Float32Array(uniformBufferSize / 4);
 // Offsets to the various uniform values in float32 indices
 const kMatrixOffset = 0;
 const matrixValue = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-// const matrix_o = mat4.create(
-// 	2 / canvasElem.clientWidth, 0, 0, 0,
-// 	0, -2 / canvasElem.clientHeight, 0, 0,
-// 	0, 0, 0.5 / 400, 0,
-// 	-1, 1, 0.5, 1,
-// );
 const matrix = mat4.perspective(utils.degToRad(45), canvas.width / canvas.height, 1, 1000);
 matrixValue.set(matrix);
 
@@ -108,7 +102,7 @@ const colorBufferSize = (4) * 4;
 const colorBuffer = device.createBuffer({
 	label: 'color',
 	size: colorBufferSize,
-	// eslint-disable-next-line no-bitwise
+
 	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 const colorValues = new Float32Array(colorBufferSize / 4);
@@ -121,7 +115,6 @@ const {vertexData, numVertices} = createFvertices();
 const vertexBuffer = device.createBuffer({
 	label: 'vertex buffer vertices',
 	size: vertexData.byteLength,
-	// eslint-disable-next-line no-bitwise
 	usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 });
 device.queue.writeBuffer(vertexBuffer, 0, vertexData);
@@ -193,15 +186,25 @@ function render(time?: number) {
 	// const rad = utils.degToRad(delta / 20);
 	const rad = utils.degToRad(0);
 
-	const t = mat4.translation([-100, -100, -400]);
+	const t = mat4.translation([-cube.girdSize * 4, -cube.girdSize * 4, -400]);
 	const r = mat4.rotationX(rad);
 	mat4.rotateY(r, rad, r);
 	mat4.rotateZ(r, rad, r);
 
-	const s = mat4.scaling([0.5, 0.5, 0.5]);
+	const s = mat4.scaling([1, 1, 1]);
 
-	const m = mat4.multiply(matrix, mat4.multiply(mat4.multiply(t, r), s));
-	matrixValue.set(m);
+	const gridPosition = [0, 0, -0.5];
+	const tempMatrix = mat4.rotationY(utils.degToRad(0));
+	mat4.translate(tempMatrix, gridPosition, tempMatrix);
+
+	const eye = tempMatrix.slice(12, 15);
+	// console.log(eye);
+
+	const e = mat4.cameraAim([0, 0, 0], gridPosition, [0, 1, 0]);
+
+	const m = mat4.multiply(e, mat4.multiply(mat4.multiply(t, r), s));
+
+	matrixValue.set(mat4.multiply(matrix, m));
 
 	device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 	pass.setBindGroup(0, bindGroup);
@@ -217,162 +220,78 @@ function render(time?: number) {
 }
 
 function createFvertices() {
+	const s = cube.girdSize;
 	const positions = [
 		// 앞면
-		-50,
-		-50,
-		50,
-		50,
-		-50,
-		50,
-		-50,
-		50,
-		50,
-		50,
-		50,
-		50,
-
+		...new Point(-s, -s, s).array,
+		...new Point(s, -s, s).array,
+		...new Point(-s, s, s).array,
+		...new Point(s, s, s).array,
 		// 뒷면
-		-50,
-		-50,
-		-50,
-		-50,
-		50,
-		-50,
-		50,
-		-50,
-		-50,
-		50,
-		50,
-		-50,
-
+		...new Point(-s, -s, -s).array,
+		...new Point(-s, s, -s).array,
+		...new Point(s, -s, -s).array,
+		...new Point(s, s, -s).array,
 		// 윗면
-		-50,
-		50,
-		-50,
-		-50,
-		50,
-		50,
-		50,
-		50,
-		-50,
-		50,
-		50,
-		50,
-
+		...new Point(-s, s, -s).array,
+		...new Point(-s, s, s).array,
+		...new Point(s, s, -s).array,
+		...new Point(s, s, s).array,
 		// 밑면
-		-50,
-		-50,
-		-50,
-		50,
-		-50,
-		-50,
-		-50,
-		-50,
-		50,
-		50,
-		-50,
-		50,
-
+		...new Point(-s, -s, -s).array,
+		...new Point(s, -s, -s).array,
+		...new Point(-s, -s, s).array,
+		...new Point(s, -s, s).array,
 		// 오른쪽 면
-		50,
-		-50,
-		-50,
-		50,
-		50,
-		-50,
-		50,
-		-50,
-		50,
-		50,
-		50,
-		50,
-
+		...new Point(s, -s, -s).array,
+		...new Point(s, s, -s).array,
+		...new Point(s, -s, s).array,
+		...new Point(s, s, s).array,
 		// 왼쪽 면
-		-50,
-		-50,
-		-50,
-		-50,
-		-50,
-		50,
-		-50,
-		50,
-		-50,
-		-50,
-		50,
-		50,
+		...new Point(-s, -s, -s).array,
+		...new Point(-s, -s, s).array,
+		...new Point(-s, s, -s).array,
+		...new Point(-s, s, s).array,
 	];
 
 	const indices = [
 		// 앞면
-		0,
-		1,
-		2,
-		2,
-		1,
-		3,
+		...new Point(0, 1, 2).array,
+		...new Point(2, 1, 3).array,
 		// 뒷면
-		4,
-		5,
-		6,
-		6,
-		5,
-		7,
+		...new Point(4, 5, 6).array,
+		...new Point(6, 5, 7).array,
 		// 윗면
-		8,
-		9,
-		10,
-		10,
-		9,
-		11,
+		...new Point(8, 9, 10).array,
+		...new Point(10, 9, 11).array,
 		// 밑면
-		12,
-		13,
-		14,
-		14,
-		13,
-		15,
+		...new Point(12, 13, 14).array,
+		...new Point(14, 13, 15).array,
 		// 오른쪽 면
-		16,
-		17,
-		18,
-		18,
-		17,
-		19,
+		...new Point(16, 17, 18).array,
+		...new Point(18, 17, 19).array,
 		// 왼쪽 면
-		20,
-		21,
-		22,
-		22,
-		21,
-		23,
+		...new Point(20, 21, 22).array,
+		...new Point(22, 21, 23).array,
 	];
 
 	const cubeLength = 9;
-	const cubeOffset = 50;
+	const cubeOffset = s;
 
 	const numVertices = indices.length * (cubeLength ** 3);
 	const vertexData = new Float32Array(numVertices * 3);
 
-	for (let cubeX = 0; cubeX < cubeLength; cubeX++) {
-		for (let cubeY = 0; cubeY < cubeLength; cubeY++) {
-			for (let cubeZ = 0; cubeZ < cubeLength; cubeZ++) {
-				for (const [i, index] of indices.entries()) {
-					const positionNdx = index * 3;
-					const position = positions.slice(positionNdx, positionNdx + 3);
-					position[0] += cubeX * cubeOffset;
-					position[1] += cubeY * cubeOffset;
-					position[2] -= cubeZ * cubeOffset;
-
-					// console.log((i + (indices.length * (cubeZ + ((cubeLength ** 2) * (cubeY + (cubeX * cubeLength)))))));
-
-					// console.log(i + (index * (cubeX + (cubeY * cubeLength))));
-
-					vertexData.set(position, (
-						i + (
-							indices.length * (cubeZ + ((cubeLength * cubeLength) * (cubeY + (cubeX * cubeLength)))))) * 3);
-				}
-			}
+	for (let c = 0; c < cubeLength ** 3; c++) {
+		for (const [i, index] of indices.entries()) {
+			const positionNdx = index * 3;
+			const position = positions.slice(positionNdx, positionNdx + 3);
+			const x = c % cubeLength;
+			position[0] += x * cubeOffset;
+			const y = Math.floor(c / cubeLength) % cubeLength;
+			position[1] += y * cubeOffset;
+			const z = Math.floor(c / cubeLength ** 2);
+			position[2] += z * cubeOffset;
+			vertexData.set(position, (i + c * indices.length) * 3);
 		}
 	}
 	// for (const [i, index] of indices.entries()) {
