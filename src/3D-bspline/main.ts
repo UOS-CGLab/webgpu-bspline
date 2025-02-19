@@ -11,6 +11,42 @@ if (!device) {
 
 // Canvas에서 webgpu context를 얻음
 const canvasElem = document.querySelector('canvas')!;
+
+const mouseInfo = {
+	isDragging: false,
+	lastX: 0, lastY: 0, lastZ: 0,
+	rotationX: 0, rotationY: 0, rotationZ: 0,
+};
+
+canvasElem.addEventListener('mousedown', event => {
+	mouseInfo.isDragging = true;
+	mouseInfo.lastX = event.clientX;
+	mouseInfo.lastY = event.clientY;
+});
+
+canvasElem.addEventListener('mousemove', event => {
+	if (!mouseInfo.isDragging) {
+		return;
+	}
+
+	const deltaX = event.clientX - mouseInfo.lastX;
+	const deltaY = event.clientY - mouseInfo.lastY;
+
+	mouseInfo.rotationY += deltaX * 0.01; // Y축 회전 (좌우 이동)
+	mouseInfo.rotationX += deltaY * 0.01; // X축 회전 (상하 이동)
+
+	mouseInfo.lastX = event.clientX;
+	mouseInfo.lastY = event.clientY;
+});
+
+canvasElem.addEventListener('mouseup', () => {
+	mouseInfo.isDragging = false;
+});
+
+canvasElem.addEventListener('mouseleave', () => {
+	mouseInfo.isDragging = false;
+});
+
 const context = canvasElem.getContext('webgpu')!;
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 // Context에 device와 format을 설정함
@@ -96,7 +132,9 @@ const uniformValues = new Float32Array(uniformBufferSize / 4);
 const kMatrixOffset = 0;
 const matrixValue = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
 const matrix = mat4.perspective(utils.degToRad(45), canvas.width / canvas.height, 1, 1000);
-matrixValue.set(matrix);
+const matLookat = mat4.lookAt([0, 0, 0], [0, -1, 0], [0, 1, 0]);
+const m1 = mat4.multiply(matrix, matLookat);
+matrixValue.set(m1);
 
 const colorBufferSize = (4) * 4;
 const colorBuffer = device.createBuffer({
@@ -186,24 +224,22 @@ function render(time?: number) {
 	// const rad = utils.degToRad(delta / 20);
 	const rad = utils.degToRad(0);
 
-	const t = mat4.translation([-cube.girdSize * 4, -cube.girdSize * 4, -400]);
-	const r = mat4.rotationX(rad);
-	mat4.rotateY(r, rad, r);
-	mat4.rotateZ(r, rad, r);
+	const t = mat4.translation([0, 0, -400]);
+	const rX = mat4.rotationX(mouseInfo.rotationX);
+	const rY = mat4.rotationY(mouseInfo.rotationY);
+	const rZ = mat4.rotationZ(mouseInfo.rotationZ);
+	const rotationMatrix = mat4.multiply(rZ, mat4.multiply(rX, rY));
 
 	const s = mat4.scaling([1, 1, 1]);
 
 	const gridPosition = [0, 0, -0.5];
 	const tempMatrix = mat4.rotationY(utils.degToRad(0));
 	mat4.translate(tempMatrix, gridPosition, tempMatrix);
-
-	const eye = tempMatrix.slice(12, 15);
 	// console.log(eye);
 
 	const e = mat4.cameraAim([0, 0, 0], gridPosition, [0, 1, 0]);
 
-	const m = mat4.multiply(e, mat4.multiply(mat4.multiply(t, r), s));
-
+	const m = mat4.multiply(e, mat4.multiply(mat4.multiply(t, rotationMatrix), s));
 	matrixValue.set(mat4.multiply(matrix, m));
 
 	device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
@@ -286,11 +322,11 @@ function createFvertices() {
 			const positionNdx = index * 3;
 			const position = positions.slice(positionNdx, positionNdx + 3);
 			const x = c % cubeLength;
-			position[0] += x * cubeOffset;
+			position[0] += x * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
 			const y = Math.floor(c / cubeLength) % cubeLength;
-			position[1] += y * cubeOffset;
+			position[1] += y * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
 			const z = Math.floor(c / cubeLength ** 2);
-			position[2] += z * cubeOffset;
+			position[2] += z * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
 			vertexData.set(position, (i + c * indices.length) * 3);
 		}
 	}
