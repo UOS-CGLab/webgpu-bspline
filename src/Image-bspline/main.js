@@ -17,14 +17,14 @@ let points;
 let triangles;
 
 function init() {
-	for (let i = 0; i < 768; i++) {
+	for (let i = 0; i < 1198; i++) {
 		minbuffer.push(0);
 		maxbuffer.push(0);
 	}
 
 	cvs = globalThis.document.querySelector('#dst');
 	ctx = cvs.getContext('2d');
-	ctx.drawImage(img, 0, 0, 1024, 768);
+	ctx.drawImage(img, 0, 0, 1023, 1198);
 	const imageX = globalThis.document.querySelector('#image');
 	imageX.remove();
 
@@ -48,12 +48,12 @@ function init() {
 	const coordinates = [
 		{x: 0, y: 0},
 		{x: 1023, y: 0},
-		{x: 0, y: 767},
-		{x: 1023, y: 767},
-		{x: 512, y: 0},
-		{x: 512, y: 767},
-		{x: 0, y: 350},
-		{x: 1023, y: 350},
+		{x: 0, y: 1198},
+		{x: 1023, y: 1198},
+		{x: 511, y: 0},
+		{x: 511, y: 1198},
+		{x: 0, y: 599},
+		{x: 1023, y: 599},
 	];
 
 	for (const coord of coordinates) {
@@ -76,8 +76,8 @@ function init() {
 	}
 	//  window.alert(triangles[0].p1);
 
-	cpy = ctx.getImageData(0, 0, 1024, 768);
-	idt = ctx.getImageData(0, 0, 1024, 768);
+	cpy = ctx.getImageData(0, 0, 1023, 1198);
+	idt = ctx.getImageData(0, 0, 1023, 1198);
 
 	ctx.putImageData(idt, 0, 0);
 	globalThis.requestAnimationFrame(refresh);
@@ -171,7 +171,7 @@ function triangle(src, dst, x1, y1, x2, y2, x3, y3, dodraw) {
 	let tot = 0;
 	for (let y = ymin; y <= ymax; y++) {
 		const d = src.data;
-		let pos = y * 1024 * 4 + minbuffer[y] * 4;
+		let pos = y * 1023 * 4 + minbuffer[y] * 4;
 		for (let x = minbuffer[y]; x <= maxbuffer[y]; x++) {
 			r += d[pos++];
 			g += d[pos++];
@@ -187,7 +187,7 @@ function triangle(src, dst, x1, y1, x2, y2, x3, y3, dodraw) {
 	let err = 0;
 	for (let y = ymin; y <= ymax; y++) {
 		const d = src.data;
-		let pos = y * 1024 * 4 + minbuffer[y] * 4;
+		let pos = y * 1023 * 4 + minbuffer[y] * 4;
 		let ri = 0;
 		let gi = 0;
 		let bi = 0;
@@ -204,8 +204,8 @@ function triangle(src, dst, x1, y1, x2, y2, x3, y3, dodraw) {
 				bi = b - d[pos++];
 				pos++;
 				err = err + (ri) * (ri)
-                    + (gi) * (gi)
-                    + (bi) * (bi);
+									+ (gi) * (gi)
+									+ (bi) * (bi);
 			}
 		}
 	}
@@ -327,7 +327,7 @@ function optimise(cx, cy) {
 			dx = Math.min(1022, Math.max(1, dx + Math.trunc(Math.random() * Range - Range / 2)));
 		}
 
-		if (dy > 0 && dy < 767) {
+		if (dy > 0 && dy < 1198) {
 			dy = Math.min(766, Math.max(1, dy + Math.trunc(Math.random() * 20 - 10)));
 		}
 
