@@ -164,16 +164,25 @@ async function triangleTest() {
 
 	const url = './src/image-bspline/sample-image.jpg';
 	const source = await loadImageBitmap(url);
-	const imageWidth = 		source.width / 2;
-	const imageHeight = 	source.height / 2;
+	const imageWidth = source.width / 2;
+	const imageHeight = source.height / 2;
 	canvas.width = imageWidth;
 	canvas.height = imageHeight;
 	context.drawImage(source, 0, 0, imageWidth, imageHeight);
 
-	const randomPoints = [];
+	const originalImageCanvas = document.createElement('canvas');
+	const originalImageContext = originalImageCanvas.getContext('2d');
+	originalImageCanvas.width = imageWidth;
+	originalImageCanvas.height = imageHeight;
+	originalImageContext?.drawImage(source, 0, 0, imageWidth, imageHeight);
+	if (!originalImageContext) {
+		throw new Error('No context');
+	}
+
+	const randomPoints = [0, 0, imageWidth - 1, 0, 0, imageHeight - 1, imageWidth - 1, imageHeight - 1];
 	for (let i = 0; i < 30; i++) {
-		const x = Math.trunc(Math.random() * imageWidth);
-		const y = Math.trunc(Math.random() * imageHeight);
+		const x = Math.trunc(Math.random() * (imageWidth - 3)) + 1;
+		const y = Math.trunc(Math.random() * (imageHeight - 3)) + 1;
 		randomPoints.push(x, y);
 
 		context.fillStyle = 'red';
@@ -181,33 +190,202 @@ async function triangleTest() {
 		context.fill();
 	}
 
-	function nextHalfedge(e: number) {
-		return (e % 3 === 2) ? e - 2 : e + 1;
-	}
+	const newPoints = calculateDelunayTriangulation(context, originalImageContext, randomPoints);
+	// console.log('newPoints:', newPoints);
+	randomPoints.push(...newPoints);
 
-	function prevHalfedge(e: number) {
-		return (e % 3 === 0) ? e + 2 : e - 1;
-	}
-
-	const delunator = new Delunator(randomPoints);
-	console.log(delunator.coords);
-
-	const e = 0;
-	const p = randomPoints[delunator.triangles[e]];
-	const q = randomPoints[delunator.triangles[nextHalfedge(e)]];
-	console.log(p, randomPoints[delunator.triangles[e] + 1]);
-	console.log(q, randomPoints[delunator.triangles[nextHalfedge(e)] + 1]);
-	context.strokeStyle = 'red';
-	context.beginPath();
-	context.moveTo(p, q);
-	context.lineTo(q, p);
-	context.stroke();
+	const newPoints2 = calculateDelunayTriangulation(context, originalImageContext, randomPoints, true);
+	// console.log('newPoints2:', newPoints2);
 
 	async function loadImageBitmap(url: string) {
 		const res = await fetch(url);
 		const blob = await res.blob();
 		return createImageBitmap(blob, {colorSpaceConversion: 'none'});
 	}
+}
+
+function calculateDelunayTriangulation(context: CanvasRenderingContext2D, originalImageContext: CanvasRenderingContext2D, points: number[], drawFace = false) {
+	const delunator = new Delunator(points);
+	const triangles = delunator.triangles;
+
+	context.strokeStyle = 'red';
+
+	const newPoints = [];
+
+	for (let i = 0; i < triangles.length; i += 3) {
+		const x1 = points[triangles[i] * 2];
+		const y1 = points[triangles[i] * 2 + 1];
+		const x2 = points[triangles[i + 1] * 2];
+		const y2 = points[triangles[i + 1] * 2 + 1];
+		const x3 = points[triangles[i + 2] * 2];
+		const y3 = points[triangles[i + 2] * 2 + 1];
+		// if (drawLines) {
+		// 	context.beginPath();
+		// 	context.moveTo(x1, y1);
+		// 	context.lineTo(x2, y2);
+		// 	context.lineTo(x3, y3);
+		// 	context.lineTo(x1, y1);
+		// 	context.closePath();
+		// 	context.stroke();
+		// }
+
+		const color = getTriangleAverageColor(originalImageContext, [x1, y1], [x2, y2], [x3, y3]);
+		// console.log(color);
+		if (drawFace) {
+			context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+			context.beginPath();
+			context.moveTo(x1, y1);
+			context.lineTo(x2, y2);
+			context.lineTo(x3, y3);
+			context.lineTo(x1, y1);
+			context.closePath();
+			context.fill();
+		}
+
+		const averageVertexError = getAverageVertexError(originalImageContext, [x1, y1], [x2, y2], [x3, y3], color);
+		// console.log('averageVertexError:', averageVertexError);
+
+		if (averageVertexError > 100) {
+			const lowPixel = getLowestErrorPoint(originalImageContext, [x1, y1], [x2, y2], [x3, y3], color);
+			// console.log('lowPixel:', lowPixel);
+
+			const lowX = lowPixel[0];
+			const lowY = lowPixel[1];
+			newPoints.push(lowX, lowY);
+
+			if (lowX > 0 && lowY > 0) {
+				// console.log('lowPixel:', lowPixel);
+				context.fillStyle = 'blue';
+				context.beginPath();
+				context.rect(lowX - 2, lowY - 2, 5, 5);
+				context.fill();
+			}
+		}
+	}
+
+	return newPoints;
+}
+
+function getTriangleAverageColor(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[]) {
+	const [x1, y1] = p1;
+	const [x2, y2] = p2;
+	const [x3, y3] = p3;
+
+	// 캔버스 크기와 이미지 데이터 가져오기
+	const {width, height} = ctx.canvas;
+	const imageData = ctx.getImageData(0, 0, width, height);
+	const data = imageData.data;
+
+	let rTotal = 0;
+	let gTotal = 0;
+	let bTotal = 0;
+	let count = 0;
+
+	// 삼각형의 바운딩 박스 계산
+	const minX = Math.min(x1, x2, x3);
+	const maxX = Math.max(x1, x2, x3);
+	const minY = Math.min(y1, y2, y3);
+	const maxY = Math.max(y1, y2, y3);
+
+	// 삼각형 내부 픽셀 판별을 위한 함수 (Barycentric 좌표 이용)
+	function isInsideTriangle(px: number, py: number) {
+		const area = 0.5 * (-y2 * x3 + y1 * (-x2 + x3) + x1 * (y2 - y3) + x2 * y3);
+		const s = (1 / (2 * area)) * (y1 * x3 - x1 * y3 + (y3 - y1) * px + (x1 - x3) * py);
+		const t = (1 / (2 * area)) * (x1 * y2 - y1 * x2 + (y1 - y2) * px + (x2 - x1) * py);
+		return s >= 0 && t >= 0 && (s + t) <= 1;
+	}
+
+	// 바운딩 박스 내 모든 픽셀 검사
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) {
+			if (isInsideTriangle(x, y)) {
+				const index = (y * width + x) * 4; // RGBA 인덱스 계산
+				rTotal += data[index]; // Red
+				gTotal += data[index + 1]; // Green
+				bTotal += data[index + 2]; // Blue
+				count++;
+			}
+		}
+	}
+
+	// 평균 색상 계산
+	if (count === 0) {
+		return [0, 0, 0];
+	} // 삼각형이 너무 작으면 검은색 반환
+
+	const rAvg = Math.floor(rTotal / count);
+	const gAvg = Math.floor(gTotal / count);
+	const bAvg = Math.floor(bTotal / count);
+
+	return [rAvg, gAvg, bAvg];
+}
+
+function getAverageVertexError(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[], color: number[]) {
+	const [x1, y1] = p1;
+	const [x2, y2] = p2;
+	const [x3, y3] = p3;
+	const [r, g, b] = color;
+
+	// 캔버스 크기와 이미지 데이터 가져오기
+	const pixel1 = ctx.getImageData(x1, y1, 1, 1).data;
+	const pixel2 = ctx.getImageData(x2, y2, 1, 1).data;
+	const pixel3 = ctx.getImageData(x3, y3, 1, 1).data;
+
+	const rError = Math.abs(pixel1[0] - r) + Math.abs(pixel2[0] - r) + Math.abs(pixel3[0] - r);
+	const gError = Math.abs(pixel1[1] - g) + Math.abs(pixel2[1] - g) + Math.abs(pixel3[1] - g);
+	const bError = Math.abs(pixel1[2] - b) + Math.abs(pixel2[2] - b) + Math.abs(pixel3[2] - b);
+
+	return rError + gError + bError;
+}
+
+function getLowestErrorPoint(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[], color: number[]) {
+	const [x1, y1] = p1;
+	const [x2, y2] = p2;
+	const [x3, y3] = p3;
+	const [r, g, b] = color;
+
+	// 캔버스 크기와 이미지 데이터 가져오기
+	const {width, height} = ctx.canvas;
+	const imageData = ctx.getImageData(0, 0, width, height);
+	const data = imageData.data;
+
+	// 삼각형의 바운딩 박스 계산
+	const minX = Math.min(x1, x2, x3);
+	const maxX = Math.max(x1, x2, x3);
+	const minY = Math.min(y1, y2, y3);
+	const maxY = Math.max(y1, y2, y3);
+
+	// 삼각형 내부 픽셀 판별을 위한 함수 (Barycentric 좌표 이용)
+	function isInsideTriangle(px: number, py: number) {
+		const area = 0.5 * (-y2 * x3 + y1 * (-x2 + x3) + x1 * (y2 - y3) + x2 * y3);
+		const s = (1 / (2 * area)) * (y1 * x3 - x1 * y3 + (y3 - y1) * px + (x1 - x3) * py);
+		const t = (1 / (2 * area)) * (x1 * y2 - y1 * x2 + (y1 - y2) * px + (x2 - x1) * py);
+		return s >= 0 && t >= 0 && (s + t) <= 1;
+	}
+
+	let lowX = 0;
+	let lowY = 0;
+	let lowError = Infinity;
+
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) {
+			if (isInsideTriangle(x, y)) {
+				const index = (y * width + x) * 4; // RGBA 인덱스 계산
+				const rError = Math.abs(data[index] - r);
+				const gError = Math.abs(data[index + 1] - g);
+				const bError = Math.abs(data[index + 2] - b);
+				const error = rError + gError + bError;
+				const isVertex = x === x1 && y === y1 || x === x2 && y === y2 || x === x3 && y === y3;
+				if (error < lowError && !isVertex) {
+					lowX = x;
+					lowY = y;
+					lowError = error;
+				}
+			}
+		}
+	}
+
+	return [lowX, lowY];
 }
 
 await main();
