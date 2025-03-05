@@ -189,7 +189,7 @@ let depthTexture: GPUTexture | undefined;
 
 render();
 
-function render(time?: number) {
+function render() {
 	if (!device) {
 		throw new Error('Need a browser that supports WebGPU');
 	}
@@ -219,10 +219,6 @@ function render(time?: number) {
 	const pass = encoder.beginRenderPass(renderPassDescriptor);
 	pass.setPipeline(pipeline);
 	pass.setVertexBuffer(0, vertexBuffer);
-
-	// const delta = time ?? 0;
-	// const rad = utils.degToRad(delta / 20);
-	const rad = utils.degToRad(0);
 
 	const t = mat4.translation([0, 0, -400]);
 	const rX = mat4.rotationX(mouseInfo.rotationX);
