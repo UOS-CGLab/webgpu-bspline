@@ -43,7 +43,6 @@ export default function drawSquares(device: GPUDevice, presentationFormat: GPUTe
 	const pointStorageBuffer = device.createBuffer({
 		label: 'storage for control points buffer',
 		size: pointBufferSize,
-		// eslint-disable-next-line no-bitwise
 		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 	});
 
