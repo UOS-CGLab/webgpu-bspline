@@ -1,5 +1,134 @@
 import Delunator from 'delaunator';
 
+type Ctx = CanvasRenderingContext2D;
+
+function drawTiralges(device: GPUDevice, presentationFormat: GPUTextureFormat, triangles: number[], triangleColors: Uint8ClampedArray[]) {
+	const triangleValue = new Float32Array(triangles.length);
+	// const imageScale = 4;
+	// 임시로 설정한 이미지의 넓이와 높이
+	const imageW = 511.9;
+	const imageH = 599;
+
+	for (let i = 0; i < triangles.length; i += 2) {
+		let x = triangles[i];
+		let y = triangles[i + 1];
+
+		x /= imageW;
+		y /= imageH;
+
+		x *= imageW / 800;
+		y *= imageH / 600;
+
+		x -= 0.5 * imageW / 800;
+		y -= 0.5 * imageH / 600;
+
+		y *= -1;
+
+		// x /= imageScale;
+		// y /= imageScale;
+
+		// x += 400;
+		// y += 300;
+
+		triangleValue[i] = x;
+		triangleValue[i + 1] = y;
+	}
+
+	const colorValue = new Float32Array(triangleColors.length * 4);
+
+	for (const [i, color] of triangleColors.entries()) {
+		const r = color[0] / 255;
+		const g = color[1] / 255;
+		const b = color[2] / 255;
+
+		colorValue[i * 4] = r;
+		colorValue[i * 4 + 1] = g;
+		colorValue[i * 4 + 2] = b;
+		colorValue[i * 4 + 3] = 1;
+	}
+
+	// console.log(triangleValue, colorValue);
+
+	const module = device.createShaderModule({
+		label: 'triangles shader',
+		code: /* wgsl */ `
+		@group(0) @binding(0) var<storage, read> trianglePoints: array<vec2f>;
+		@group(0) @binding(1) var<storage, read> triangleColors: array<vec4f>;
+
+		struct TriangleOutput {
+			@builtin(position) position: vec4f,
+			@location(0) color: vec4f,
+		};
+
+		@vertex fn vs(
+			@builtin(vertex_index) vertexIndex: u32,
+			@builtin(instance_index) instanceIndex: u32,
+		) -> TriangleOutput {
+			let index: u32 = instanceIndex * 3 + vertexIndex;
+			var triOut: TriangleOutput;
+			triOut.position = vec4f(trianglePoints[index], 0.0, 1.0);
+			triOut.color = triangleColors[index];
+
+			return triOut;
+		}
+
+		@fragment fn fs(fsInput: TriangleOutput) -> @location(0) vec4f {
+			return fsInput.color;
+		}
+		`,
+	});
+
+	const pipeline = device.createRenderPipeline({
+		label: 'triangles pipeline',
+		layout: 'auto',
+		vertex: {
+			module,
+		},
+		fragment: {
+			module,
+			targets: [{format: presentationFormat}],
+		},
+	});
+
+	const vertUnitSize = 3 * 2 * 4; // 삼각형, 2개의 정점, 4 bit float
+	const vertLength = triangles.length / (3 * 2);
+	const vertBufferSize = vertUnitSize * vertLength;
+
+	const vertStorageBuffer = device.createBuffer({
+		label: 'storage for triangle vertex Buffer',
+		size: vertBufferSize,
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+	});
+
+	const colorUnitSize = 4 * 4; // rgba, 4 bit float
+	const colorLength = triangleColors.length;
+	const colorBufferSize = colorUnitSize * colorLength;
+
+	const colorStorageBuffer = device.createBuffer({
+		label: 'storage for triangle color buffer',
+		size: colorBufferSize,
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+	});
+
+	const triangleBindGroup = device.createBindGroup({
+		label: 'bind group for triangle',
+		layout: pipeline.getBindGroupLayout(0),
+		entries: [
+			{binding: 0, resource: {buffer: vertStorageBuffer}},
+			{binding: 1, resource: {buffer: colorStorageBuffer}},
+		],
+	});
+
+	return (pass: GPURenderPassEncoder) => {
+		device.queue.writeBuffer(vertStorageBuffer, 0, triangleValue);
+		device.queue.writeBuffer(colorStorageBuffer, 0, colorValue);
+
+		pass.setPipeline(pipeline);
+		pass.setBindGroup(0, triangleBindGroup);
+		pass.draw(3, vertLength);
+	};
+}
+
 async function main() {
 	const adapter = await navigator.gpu?.requestAdapter();
 	const device = await adapter?.requestDevice();
@@ -93,6 +222,7 @@ async function main() {
            | GPUTextureUsage.COPY_DST
            | GPUTextureUsage.RENDER_ATTACHMENT,
 	});
+
 	device.queue.copyExternalImageToTexture(
 		{source, flipY: true},
 		{texture},
@@ -125,6 +255,9 @@ async function main() {
 		],
 	};
 
+	const [triangles, triangleColors] = await triangleTest();
+	const triangleFunc = drawTiralges(device, presentationFormat, triangles, triangleColors);
+
 	function render() {
 		// Get the current texture from the canvas context and
 		// set it as the texture to render to.
@@ -145,6 +278,7 @@ async function main() {
 		pass.setPipeline(pipeline);
 		pass.setBindGroup(0, bindGroup);
 		pass.draw(6); // call our vertex shader 6 times
+		triangleFunc(pass);
 		pass.end();
 
 		const commandBuffer = encoder.finish();
@@ -154,48 +288,34 @@ async function main() {
 	render();
 }
 
-async function triangleTest() {
-	const canvas: HTMLCanvasElement = document.querySelector('#triangle-canvas')!;
-	const context = canvas.getContext('2d');
-
-	if (!context) {
-		throw new Error('No context');
-	}
-
+async function triangleTest(): Promise<[number[], number[][]]> {
 	const url = './src/image-bspline/sample-image.jpg';
 	const source = await loadImageBitmap(url);
 	const imageWidth = source.width / 2;
 	const imageHeight = source.height / 2;
-	canvas.width = imageWidth;
-	canvas.height = imageHeight;
-	context.drawImage(source, 0, 0, imageWidth, imageHeight);
 
-	const originalImageCanvas = document.createElement('canvas');
-	const originalImageContext = originalImageCanvas.getContext('2d');
-	originalImageCanvas.width = imageWidth;
-	originalImageCanvas.height = imageHeight;
-	originalImageContext?.drawImage(source, 0, 0, imageWidth, imageHeight);
-	if (!originalImageContext) {
+	const imageCanvas = document.createElement('canvas');
+	const imageContext = imageCanvas.getContext('2d');
+	imageCanvas.width = imageWidth;
+	imageCanvas.height = imageHeight;
+	imageContext?.drawImage(source, 0, 0, imageWidth, imageHeight);
+	if (!imageContext) {
 		throw new Error('No context');
 	}
 
-	const randomPoints = [0, 0, imageWidth - 1, 0, 0, imageHeight - 1, imageWidth - 1, imageHeight - 1];
-	for (let i = 0; i < 30; i++) {
-		const x = Math.trunc(Math.random() * (imageWidth - 3)) + 1;
-		const y = Math.trunc(Math.random() * (imageHeight - 3)) + 1;
-		randomPoints.push(x, y);
+	const initPoints = [];
+	const gridLength = 7;
 
-		context.fillStyle = 'red';
-		context.rect(x - 2, y - 2, 5, 5);
-		context.fill();
+	for (let x = 0; x < gridLength + 1; x++) {
+		for (let y = 0; y < gridLength + 1; y++) {
+			const pX = Math.trunc((imageWidth - 1) * x / gridLength);
+			const pY = Math.trunc((imageHeight - 1) * y / gridLength);
+			initPoints.push(pX, pY);
+		}
 	}
 
-	const newPoints = calculateDelunayTriangulation(context, originalImageContext, randomPoints);
-	// console.log('newPoints:', newPoints);
-	randomPoints.push(...newPoints);
-
-	const newPoints2 = calculateDelunayTriangulation(context, originalImageContext, randomPoints, true);
-	// console.log('newPoints2:', newPoints2);
+	const [triangles, triangleColors] = calcDelunayTriangulation(imageContext, initPoints, 5);
+	return [triangles, triangleColors];
 
 	async function loadImageBitmap(url: string) {
 		const res = await fetch(url);
@@ -204,69 +324,70 @@ async function triangleTest() {
 	}
 }
 
-function calculateDelunayTriangulation(context: CanvasRenderingContext2D, originalImageContext: CanvasRenderingContext2D, points: number[], drawFace = false) {
-	const delunator = new Delunator(points);
-	const triangles = delunator.triangles;
+function calcDelunayTriangulation(imageContext: Ctx, initPoints: number[], depth: number): [number[], number[][]] {
+	// 초기의 배열 복사
+	const points = [...initPoints];
 
-	context.strokeStyle = 'red';
+	// 주어진 depth만큼 points 증가
+	for (let d = 0; d < depth; d++) {
+		const delunator = new Delunator(points);
+		const triangles = delunator.triangles;
 
-	const newPoints = [];
+		if (d === depth - 1) {
+			const triPoints = [];
+			const triColors = [];
 
-	for (let i = 0; i < triangles.length; i += 3) {
-		const x1 = points[triangles[i] * 2];
-		const y1 = points[triangles[i] * 2 + 1];
-		const x2 = points[triangles[i + 1] * 2];
-		const y2 = points[triangles[i + 1] * 2 + 1];
-		const x3 = points[triangles[i + 2] * 2];
-		const y3 = points[triangles[i + 2] * 2 + 1];
-		// if (drawLines) {
-		// 	context.beginPath();
-		// 	context.moveTo(x1, y1);
-		// 	context.lineTo(x2, y2);
-		// 	context.lineTo(x3, y3);
-		// 	context.lineTo(x1, y1);
-		// 	context.closePath();
-		// 	context.stroke();
-		// }
+			for (let i = 0; i < triangles.length; i += 3) {
+				const x1 = points[triangles[i] * 2];
+				const y1 = points[triangles[i] * 2 + 1];
+				const x2 = points[triangles[i + 1] * 2];
+				const y2 = points[triangles[i + 1] * 2 + 1];
+				const x3 = points[triangles[i + 2] * 2];
+				const y3 = points[triangles[i + 2] * 2 + 1];
 
-		const color = getTriangleAverageColor(originalImageContext, [x1, y1], [x2, y2], [x3, y3]);
-		// console.log(color);
-		if (drawFace) {
-			context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-			context.beginPath();
-			context.moveTo(x1, y1);
-			context.lineTo(x2, y2);
-			context.lineTo(x3, y3);
-			context.lineTo(x1, y1);
-			context.closePath();
-			context.fill();
+				// const color1 = getPixelColorOfImage(imageContext, [x1, y1]);
+				// const color2 = getPixelColorOfImage(imageContext, [x2, y2]);
+				// const color3 = getPixelColorOfImage(imageContext, [x3, y3]);
+				const avgColor = getTriangleAverageColor(imageContext, [x1, y1], [x2, y2], [x3, y3]);
+
+				triPoints.push(x1, y1, x2, y2, x3, y3);
+				triColors.push(avgColor, avgColor, avgColor);
+			}
+
+			return [triPoints, triColors];
 		}
 
-		const averageVertexError = getAverageVertexError(originalImageContext, [x1, y1], [x2, y2], [x3, y3], color);
-		// console.log('averageVertexError:', averageVertexError);
+		// 주어진 triangle을 순환하면서 새로운 point 지정
+		for (let i = 0; i < triangles.length; i += 3) {
+			const x1 = points[triangles[i] * 2];
+			const y1 = points[triangles[i] * 2 + 1];
+			const x2 = points[triangles[i + 1] * 2];
+			const y2 = points[triangles[i + 1] * 2 + 1];
+			const x3 = points[triangles[i + 2] * 2];
+			const y3 = points[triangles[i + 2] * 2 + 1];
 
-		if (averageVertexError > 100) {
-			const lowPixel = getLowestErrorPoint(originalImageContext, [x1, y1], [x2, y2], [x3, y3], color);
-			// console.log('lowPixel:', lowPixel);
+			const avgColor = getTriangleAverageColor(imageContext, [x1, y1], [x2, y2], [x3, y3]);
 
-			const lowX = lowPixel[0];
-			const lowY = lowPixel[1];
-			newPoints.push(lowX, lowY);
+			const averageVertexError = getAverageVertexError(imageContext, [x1, y1], [x2, y2], [x3, y3], avgColor);
 
-			if (lowX > 0 && lowY > 0) {
+			if (averageVertexError > 100) {
+				const lowPixel = getLowestErrorPoint(imageContext, [x1, y1], [x2, y2], [x3, y3], avgColor);
 				// console.log('lowPixel:', lowPixel);
-				context.fillStyle = 'blue';
-				context.beginPath();
-				context.rect(lowX - 2, lowY - 2, 5, 5);
-				context.fill();
+
+				const lowX = lowPixel[0];
+				const lowY = lowPixel[1];
+
+				if (lowX > 0 && lowY > 0) {
+					points.push(lowX, lowY);
+				}
 			}
 		}
 	}
 
-	return newPoints;
+	return [[], []];
 }
 
-function getTriangleAverageColor(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[]) {
+function getTriangleAverageColor(ctx: Ctx, p1: number[], p2: number[], p3: number[]) {
 	const [x1, y1] = p1;
 	const [x2, y2] = p2;
 	const [x3, y3] = p3;
@@ -320,7 +441,7 @@ function getTriangleAverageColor(ctx: CanvasRenderingContext2D, p1: number[], p2
 	return [rAvg, gAvg, bAvg];
 }
 
-function getAverageVertexError(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[], color: number[]) {
+function getAverageVertexError(ctx: Ctx, p1: number[], p2: number[], p3: number[], color: number[]) {
 	const [x1, y1] = p1;
 	const [x2, y2] = p2;
 	const [x3, y3] = p3;
@@ -338,7 +459,7 @@ function getAverageVertexError(ctx: CanvasRenderingContext2D, p1: number[], p2: 
 	return rError + gError + bError;
 }
 
-function getLowestErrorPoint(ctx: CanvasRenderingContext2D, p1: number[], p2: number[], p3: number[], color: number[]) {
+function getLowestErrorPoint(ctx: Ctx, p1: number[], p2: number[], p3: number[], color: number[]) {
 	const [x1, y1] = p1;
 	const [x2, y2] = p2;
 	const [x3, y3] = p3;
@@ -346,8 +467,7 @@ function getLowestErrorPoint(ctx: CanvasRenderingContext2D, p1: number[], p2: nu
 
 	// 캔버스 크기와 이미지 데이터 가져오기
 	const {width, height} = ctx.canvas;
-	const imageData = ctx.getImageData(0, 0, width, height);
-	const data = imageData.data;
+	const data = ctx.getImageData(0, 0, width, height).data;
 
 	// 삼각형의 바운딩 박스 계산
 	const minX = Math.min(x1, x2, x3);
@@ -386,6 +506,10 @@ function getLowestErrorPoint(ctx: CanvasRenderingContext2D, p1: number[], p2: nu
 	}
 
 	return [lowX, lowY];
+}
+
+function getPixelColorOfImage(ctx: Ctx, p: number[]) {
+	return ctx.getImageData(p[0], p[1], 1, 1).data;
 }
 
 await main();
