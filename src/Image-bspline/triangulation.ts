@@ -79,7 +79,14 @@ function clacDelunay(
 					[x3, y3],
 				);
 
-				triPoints.push(x1, y1, x2, y2, x3, y3);
+				const offsetX = 400;
+				const offsetY = 200;
+
+				triPoints.push(
+					x1 + offsetX, y1 + offsetY, 
+					x2 + offsetX, y2 + offsetY, 
+					x3 + offsetX, y3 + offsetY
+				);
 				// triColors.push([...color1], [...color2], [...color3]);
 				triColors.push(avgColor, avgColor, avgColor);
 			}

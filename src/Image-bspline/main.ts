@@ -152,7 +152,7 @@ function drawTiralges(device: GPUDevice, presentationFormat: GPUTextureFormat, t
 		) -> TriangleOutput {
 			let index: u32 = instanceIndex * 3 + vertexIndex;
 			var triOut: TriangleOutput;
-			triOut.position = vec4f(trianglePoints[index], 0.0, 1.0);
+			triOut.position = vec4f(trianglePoints[index].x - 0.1f, trianglePoints[index].y, 0.0, 1.0);
 			triOut.color = triangleColors[index];
 
 			return triOut;

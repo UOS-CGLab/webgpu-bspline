@@ -23,16 +23,16 @@ export default async function computeUv(device: GPUDevice, triangles: number[]) 
 		x *= 0.5;
 		y *= 0.5;
 
-		// x -= 25;
-		// y -= 25;
+		// x -= 10;
+		// y -= 10;
 
-		x += canvas.width / 2;
-		y += canvas.height / 2;
+		// x += canvas.width / 2;
+		// y += canvas.height / 2;
 
-		x -= image.width / 2;
-		y -= image.height / 2;
+		// x -= image.width / 2;
+		// y -= image.height / 2;
 
-		triangleVector.push(new Vector(triangles[i], triangles[i + 1]));
+		triangleVector.push(new Vector(x, y));
 	}
 
 	const module = device.createShaderModule({
@@ -58,8 +58,8 @@ export default async function computeUv(device: GPUDevice, triangles: number[]) 
         let knot: f32 = f32(knotVector[knotVectorLen - 1]);
 
         let uv: vec2f = vec2f(
+					knot * (trianglePoint[idx].y - gridStart.y) / (gridEnd.y - gridStart.y),
           knot * (trianglePoint[idx].x - gridStart.x) / (gridEnd.x - gridStart.x),
-          knot * (trianglePoint[idx].y - gridStart.y) / (gridEnd.y - gridStart.y),
         );
         uvResult[idx] = uv;
     }}
@@ -89,7 +89,6 @@ export default async function computeUv(device: GPUDevice, triangles: number[]) 
 
 	const uvBuffer = device.createBuffer({
 		size: triangleVector.length * 2 * 4,
-
 		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
 	});
 
