@@ -1,6 +1,7 @@
 import {mat4, utils} from 'wgpu-matrix';
 import {canvas, cube} from './config';
 import Point from './point';
+import {loadSphere, extractMeshDataFromThree} from './objLoad';
 
 // Adapter와 device를 얻음
 const adapter = await navigator.gpu?.requestAdapter();
@@ -187,6 +188,133 @@ const renderPassDescriptor = {
 
 let depthTexture: GPUTexture | undefined;
 
+// 3d 모델 로드
+
+async function createSphere() {
+	const meshes = await loadSphere();
+
+	for (const mesh of meshes) {
+		const data = extractMeshDataFromThree(mesh);
+
+		if (!device) {
+			return;
+		}
+
+		const positionBuffer = createBuffer(device, data.positions, GPUBufferUsage.VERTEX);
+		const normalBuffer = data.normals ? createBuffer(device, data.normals, GPUBufferUsage.VERTEX) : null;
+		const uvBuffer = data.uvs ? createBuffer(device, data.uvs, GPUBufferUsage.VERTEX) : null;
+		const indexBuffer = data.indices ? createBuffer(device, data.indices, GPUBufferUsage.INDEX) : null;
+
+		const pipeline = createRenderPipeline(device); // 셰이더, 레이아웃 등 포함한 pipeline 생성
+
+		const commandEncoder = device.createCommandEncoder();
+		const textureView = context.getCurrentTexture().createView();
+
+		const renderPass = commandEncoder.beginRenderPass({
+			colorAttachments: [{
+				view: textureView,
+				loadOp: 'clear',
+				storeOp: 'store',
+				clearValue: {
+					r: 0.1, g: 0.1, b: 0.1, a: 1,
+				},
+			}],
+		});
+
+		renderPass.setPipeline(pipeline);
+		renderPass.setVertexBuffer(0, positionBuffer);
+		if (normalBuffer) {
+			renderPass.setVertexBuffer(1, normalBuffer);
+		}
+
+		if (uvBuffer) {
+			renderPass.setVertexBuffer(2, uvBuffer);
+		}
+
+		if (indexBuffer) {
+			renderPass.setIndexBuffer(indexBuffer, 'uint16'); // 혹은 'uint32'에 맞춰 조정
+			renderPass.drawIndexed(data.indices.length, 1, 0, 0, 0);
+		} else {
+			renderPass.draw(data.positions.length / 3, 1, 0, 0);
+		}
+
+		renderPass.end();
+		device.queue.submit([commandEncoder.finish()]);
+	}
+
+	function createBuffer(device: GPUDevice, data: Float32Array | Uint16Array | Uint32Array, usage: GPUBufferUsageFlags): GPUBuffer {
+		const buffer = device.createBuffer({
+			size: (data.byteLength + 3) & ~3, // 4바이트 정렬
+			usage,
+			mappedAtCreation: true,
+		});
+		const writeArray
+		= data instanceof Float32Array ? new Float32Array(buffer.getMappedRange())
+			: (data instanceof Uint16Array ? new Uint16Array(buffer.getMappedRange())
+				: new Uint32Array(buffer.getMappedRange()));
+		writeArray.set(data);
+		buffer.unmap();
+		return buffer;
+	}
+
+	function createRenderPipeline(device: GPUDevice): GPURenderPipeline {
+		const vertexShaderModule = device.createShaderModule({
+			code: /* wgsl */`
+			@vertex
+			fn main(
+				@location(0) position: vec3<f32>,
+				@location(1) normal: vec3<f32>,
+				@location(2) uv: vec2<f32>
+			) -> @builtin(position) vec4<f32> {
+				return vec4(position, 1.0);
+			}
+		`,
+		});
+
+		const fragmentShaderModule = device.createShaderModule({
+			code: /* wgsl */ `
+			@fragment
+			fn main() -> @location(0) vec4<f32> {
+				return vec4(1.0, 0.8, 0.2, 1.0);
+			}
+		`,
+		});
+
+		return device.createRenderPipeline({
+			layout: 'auto',
+			vertex: {
+				module: vertexShaderModule,
+				entryPoint: 'main',
+				buffers: [
+					{
+						arrayStride: 12,
+						attributes: [{shaderLocation: 0, offset: 0, format: 'float32x3'}],
+					},
+					{
+						arrayStride: 12,
+						attributes: [{shaderLocation: 1, offset: 0, format: 'float32x3'}],
+					},
+					{
+						arrayStride: 8,
+						attributes: [{shaderLocation: 2, offset: 0, format: 'float32x2'}],
+					},
+				],
+			},
+			fragment: {
+				module: fragmentShaderModule,
+				entryPoint: 'main',
+				targets: [{format: navigator.gpu.getPreferredCanvasFormat()}],
+			},
+			primitive: {
+				topology: 'triangle-list',
+				cullMode: 'back',
+			},
+		});
+	}
+}
+
+await createSphere();
+
 render();
 
 function render() {
@@ -249,6 +377,23 @@ function render() {
 	device.queue.submit([commandBuffer]);
 
 	requestAnimationFrame(render);
+}
+
+function createBuffer(device: GPUDevice, data: Float32Array | Uint16Array, usage: GPUBufferUsageFlags): GPUBuffer {
+	const buffer = device.createBuffer({
+		size: (data.byteLength + 3) & ~3,
+		usage,
+		mappedAtCreation: true,
+	});
+	const mapping = buffer.getMappedRange();
+	if (data instanceof Float32Array) {
+		new Float32Array(mapping).set(data);
+	} else {
+		new Uint16Array(mapping).set(data);
+	}
+
+	buffer.unmap();
+	return buffer;
 }
 
 function createFvertices() {
