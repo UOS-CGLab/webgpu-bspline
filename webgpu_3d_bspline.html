@@ -1,20 +1,57 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>B spline surface</title>
+    <title>WebGPU GLB 로더</title>
     <style>
       body {
-        width: 100%;
-        height: 100vh;
         margin: 0;
-        padding: 0;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        background: #1a1a1a;
+        color: white;
+      }
+      canvas {
+        display: block;
+        margin: 20px auto;
+        border: 1px solid #333;
+        background: #000;
+      }
+      .controls {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      input[type="file"] {
+        margin: 10px;
+        padding: 5px;
+      }
+      .info {
+        text-align: center;
+        margin: 10px;
+        font-size: 14px;
+        color: #ccc;
+      }
+      .error {
+        color: #ff6b6b;
+        text-align: center;
+        margin: 10px;
       }
     </style>
   </head>
   <body>
-    <canvas width="800" height="600"></canvas>
-    <script type="module" src="src/3D-bspline/main.ts"></script>
+    <div class="controls">
+      <h1>WebGPU GLB 파일 로더</h1>
+      <input type="file" id="fileInput" accept=".glb,.gltf" />
+      <div class="info">GLB 또는 GLTF 파일을 선택하세요</div>
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <div class="info">마우스로 드래그하여 회전, 휠로 줌 조절</div>
+
+    <div id="error" class="error"></div>
+
+    <script type="module" src="./src/3D-bspline/main.ts"></script>
   </body>
 </html>
