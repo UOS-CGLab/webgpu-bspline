@@ -7,14 +7,24 @@ with open("Girl_with_a_Pearl_Earring.svg") as f:
 path_elements = re.findall(r"<path[^>]*>", svg_content)
 # path요소에서 d 속성 추출
 path_data = []
+color_data = []
 
 for path in path_elements:
     d_match = re.search(r'd="([^"]+)"', path)
     if d_match:
         path_data.append(d_match.group(1))
+    color_match = re.search(r'fill="([^"]+)"', path)
+    if color_match:
+        color = color_match.group(1)
+        color_split = color[5:-1].split(",")
+        color = list(int(c) for c in color_split)[:-1]
+        color_data.append(color)
+
+print(color_data[0])
 
 # d="M530,700 L529,701 L526,701 L530,700"에서 좌표만 추출
 coordinates = []
+# colors = []
 
 for d in path_data:
     d_split = d.split(" ")
@@ -25,5 +35,10 @@ for d in path_data:
 
     coordinates.append(triangle)
 
-print(path_data[0])
-print(coordinates[0])
+coord_tuple = tuple()
+
+for coord in coordinates:
+    for point in coord:
+        coord_tuple += point
+
+print(len(coord_tuple))
