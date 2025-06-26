@@ -59,12 +59,14 @@ def change_coord(triangle):
     scale = 0.25
     new_coord = []
     for i in range(3):
-        x = triangle[i][0] * scale
-        y = triangle[i][1] * scale
+        x = triangle[i][0]
+        y = triangle[i][1]
+        x -= max_x / 2
+        y -= max_y / 2
+        x *= scale
+        y *= scale
         x += offset_x
         y += offset_y
-        x -= max_x * scale / 2
-        y -= max_y * scale / 2
         
         new_coord.extend([x, y])
     return new_coord

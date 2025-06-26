@@ -8,6 +8,7 @@
     "import/extensions": 0,
     "capitalized-comments": 0,
     "no-bitwise": 0,
-    "no-mixed-operators": 0
+    "no-mixed-operators": 0,
+    "@typescript-eslint/naming-convention": 0
   }
 }

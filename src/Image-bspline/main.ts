@@ -56,8 +56,8 @@ console.log(jsonData);
 // const [initTriangles, triangleColors] = await triangleTest();
 // console.log(initTriangles, triangleColors);
 
-const initTriangles = jsonData.coordinates.slice(0, 6 * 100);
-const triangleColors = jsonData.colors.slice(0, 3 * 100);
+const initTriangles = jsonData.coordinates.slice(0, 6 * 10000);
+const triangleColors = jsonData.colors.slice(0, 3 * 10000);
 
 console.log(initTriangles, triangleColors);
 
