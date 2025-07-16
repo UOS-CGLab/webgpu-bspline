@@ -1,4 +1,8 @@
 import {vec3, mat4} from 'wgpu-matrix';
+import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
+import {type BufferGeometry, type Mesh} from 'three';
+import Cube from './cube.js'; //
+import Model from './model.js';
 
 const canvas: HTMLCanvasElement = document.querySelector('#canvas')!;
 const gl = canvas.getContext('webgl2');
@@ -51,7 +55,8 @@ eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
 
 const cubeSize = 0.8;
 const cubeNumber = 4;
-const pStart = -cubeSize * (cubeNumber / 2);
+const pStart = -(cubeSize * (cubeNumber - 1) / 2);
+console.log(pStart);
 type Point = {
 	index: [number, number, number];
 	position: [number, number, number];
@@ -153,118 +158,29 @@ gl.clearColor(0.3, 0.3, 0.3, 1);
 // Gl.clear(gl.COLOR_BUFFER_BIT);
 // gl.drawArrays(gl.LINES, 0, lineVertices.length / 3);
 
-// cubes
-// 한 개의 단위 큐브 정점 (-0.05 ~ +0.05 범위)
-const cubeVertexData = new Float32Array([
-	// 앞면
-	-0.05,
-	-0.05,
-	0.05,
-	0.05,
-	-0.05,
-	0.05,
-	0.05,
-	0.05,
-	0.05,
-	-0.05,
-	0.05,
-	0.05,
-	// 뒷면
-	-0.05,
-	-0.05,
-	-0.05,
-	0.05,
-	-0.05,
-	-0.05,
-	0.05,
-	0.05,
-	-0.05,
-	-0.05,
-	0.05,
-	-0.05,
-]);
-
-// 정육면체를 이루는 인덱스 (12 triangles = 36 indices)
-const cubeIndices = new Uint16Array([
-	// 앞면
-	0,
-	1,
-	2,
-	0,
-	2,
-	3,
-	// 오른쪽
-	1,
-	5,
-	6,
-	1,
-	6,
-	2,
-	// 뒷면
-	5,
-	4,
-	7,
-	5,
-	7,
-	6,
-	// 왼쪽
-	4,
-	0,
-	3,
-	4,
-	3,
-	7,
-	// 윗면
-	3,
-	2,
-	6,
-	3,
-	6,
-	7,
-	// 아랫면
-	4,
-	5,
-	1,
-	4,
-	1,
-	0,
-]);
-
-const cubeColors: number[] = [];
-
+const cubes: Cube[] = [];
 for (const point of initialPoint) {
-	const [x, y, z] = point.index;
-
-	// X, y, z 정규화 (0 ~ 1)
-	const r = x / (cubeNumber - 1);
-	const g = y / (cubeNumber - 1);
-	const b = z / (cubeNumber - 1);
-
-	// 모든 정점에 동일한 색상을 사용하므로 8개 복사
-	for (let i = 0; i < 8; i++) {
-		cubeColors.push(r, g, b);
-	}
+	const cube = new Cube(gl, point.position, cubeSize * 0.1, vec3.fromValues(...point.index.map(i => i / (cubeNumber - 1))));
+	cubes.push(cube);
 }
 
-const colorBuffer = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cubeColors), gl.STATIC_DRAW);
+let model: Model | undefined;
 
-const aColor = gl.getAttribLocation(program, 'a_color');
+const loader = new GLTFLoader();
+loader.load('./sphere.glb', gltf => {
+	const mesh = gltf.scene.getObjectByProperty('type', 'Mesh') as Mesh;
+	const geometry = mesh.geometry;
 
-gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-gl.enableVertexAttribArray(aColor);
-gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+	const positionAttribute = geometry.getAttribute('position');
+	const colorAttribute = geometry.getAttribute('color'); // 색상 정보가 있는 경우만
+	const indexAttribute = geometry.getIndex();
 
-// === 큐브 정점 버퍼 ===
-const cubeVbo = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, cubeVbo);
-gl.bufferData(gl.ARRAY_BUFFER, cubeVertexData, gl.STATIC_DRAW);
-
-// === 큐브 인덱스 버퍼 ===
-const cubeIbo = gl.createBuffer();
-gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIbo);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cubeIndices, gl.STATIC_DRAW);
+	const positions = positionAttribute.array;
+	const colors = colorAttribute ? colorAttribute.array : null;
+	const indices = indexAttribute?.array;
+	console.log(positions, colors, indices);
+	model = new Model(gl, new Float32Array(positions), indices ? new Uint16Array(indices) : new Uint16Array([]));
+});
 
 function render() {
 	if (!gl) {
@@ -281,15 +197,13 @@ function render() {
 	const vp = mat4.multiply(proj, view);
 
 	gl.viewport(0, 0, canvas.width, canvas.height);
+	gl.enable(gl.DEPTH_TEST);
+	gl.enable(gl.CULL_FACE);
+	// eslint-disable-next-line no-bitwise
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 	gl.useProgram(program);
 	gl.uniformMatrix4fv(uMatrix, false, vp);
-
-	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-	gl.enableVertexAttribArray(aPosition);
-	gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
-	gl.drawArrays(gl.LINES, 0, lineVertices.length / 3);
 
 	// === 선 그리기 ===
 	gl.useProgram(program);
@@ -301,30 +215,38 @@ function render() {
 	gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
 	gl.drawArrays(gl.LINES, 0, lineVertices.length / 3);
 
-	// === 큐브 그리기 ===
-	gl.useProgram(program);
-	gl.uniform1i(uUseVertexColor, 1); // 색상 사용 ON
+	// // === 큐브 그리기 ===
+	// gl.useProgram(program);
+	// gl.uniform1i(uUseVertexColor, 1); // 색상 사용 ON
 
-	// 정점 버퍼
-	gl.bindBuffer(gl.ARRAY_BUFFER, cubeVbo);
-	gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
-	gl.enableVertexAttribArray(aPosition);
+	// // 정점 버퍼
+	// gl.bindBuffer(gl.ARRAY_BUFFER, cubeVbo);
+	// gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+	// gl.enableVertexAttribArray(aPosition);
 
-	// 색상 버퍼
-	gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-	gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
-	gl.enableVertexAttribArray(aColor);
+	// // 색상 버퍼
+	// gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+	// gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+	// gl.enableVertexAttribArray(aColor);
 
-	// 인덱스 버퍼
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIbo);
+	// // 인덱스 버퍼
+	// gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIbo);
 
 	// MVP 매트릭스 및 그리기
-	for (const point of initialPoint) {
-		const model = mat4.translation(point.position);
+	// for (const point of initialPoint) {
+	// 	const model = mat4.translation(point.position);
+	// 	const mv*////* = mat4.multiply(vp, model);
+	// 	gl.uniformMatrix4fv(uMatrix, false, mvp);
+	// 	gl.drawElements(gl.TRIANGLES, cubeIndices.length, gl.UNSIGNED_SHORT, 0);
+	// }
+
+	for (const cube of cubes) {
+		const model = mat4.translation(cube.pos);
 		const mvp = mat4.multiply(vp, model);
-		gl.uniformMatrix4fv(uMatrix, false, mvp);
-		gl.drawElements(gl.TRIANGLES, cubeIndices.length, gl.UNSIGNED_SHORT, 0);
+		cube.render(gl, mvp);
 	}
+
+	model?.render(gl, vp);
 
 	requestAnimationFrame(render);
 }
