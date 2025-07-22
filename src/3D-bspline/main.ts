@@ -1,484 +1,254 @@
-import {mat4, utils} from 'wgpu-matrix';
-import {canvas, cube} from './config';
-import Point from './point';
-import {loadSphere, extractMeshDataFromThree} from './objLoad';
+import {vec3, mat4} from 'wgpu-matrix';
+import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
+import {type BufferGeometry, type Mesh} from 'three';
+import Cube from './cube.js'; //
+import Model from './model.js';
 
-// Adapter와 device를 얻음
-const adapter = await navigator.gpu?.requestAdapter();
-const device = await adapter?.requestDevice();
-if (!device) {
-	throw new Error('Need a browser that supports WebGPU');
+const canvas: HTMLCanvasElement = document.querySelector('#canvas')!;
+const gl = canvas.getContext('webgl2');
+if (!gl) {
+	throw new Error('No webgl2 context');
 }
 
-// Canvas에서 webgpu context를 얻음
-const canvasElem = document.querySelector('canvas')!;
+let yaw = 0; // Left right rotation
+let pitch = 0; // Up down rotation
+let distance = 5; // Distacne between camera and target
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
 
-const mouseInfo = {
-	isDragging: false,
-	lastX: 0, lastY: 0, lastZ: 0,
-	rotationX: 0, rotationY: 0, rotationZ: 0,
-};
-
-canvasElem.addEventListener('mousedown', event => {
-	mouseInfo.isDragging = true;
-	mouseInfo.lastX = event.clientX;
-	mouseInfo.lastY = event.clientY;
+canvas.addEventListener('mousedown', event => {
+	dragging = true;
+	lastX = event.clientX;
+	lastY = event.clientY;
 });
 
-canvasElem.addEventListener('mousemove', event => {
-	if (!mouseInfo.isDragging) {
+canvas.addEventListener('mouseup', () => {
+	dragging = false;
+});
+canvas.addEventListener('mouseleave', () => {
+	dragging = false;
+});
+canvas.addEventListener('mousemove', event => {
+	if (!dragging) {
 		return;
 	}
 
-	const deltaX = event.clientX - mouseInfo.lastX;
-	const deltaY = event.clientY - mouseInfo.lastY;
-
-	mouseInfo.rotationY += deltaX * 0.01; // Y축 회전 (좌우 이동)
-	mouseInfo.rotationX += deltaY * 0.01; // X축 회전 (상하 이동)
-
-	mouseInfo.lastX = event.clientX;
-	mouseInfo.lastY = event.clientY;
+	const dx = event.clientX - lastX;
+	const dy = event.clientY - lastY;
+	yaw -= dx * 0.01;
+	pitch += dy * 0.01;
+	pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+	lastX = event.clientX;
+	lastY = event.clientY;
 });
 
-canvasElem.addEventListener('mouseup', () => {
-	mouseInfo.isDragging = false;
+canvas.addEventListener('wheel', event => {
+	distance += event.deltaY * 0.01;
+	distance = Math.max(1, distance);
 });
 
-canvasElem.addEventListener('mouseleave', () => {
-	mouseInfo.isDragging = false;
-});
+const eye = vec3.create();
+eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
+eye[1] = distance * Math.sin(pitch);
+eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
 
-const context = canvasElem.getContext('webgpu')!;
-const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-// Context에 device와 format을 설정함
-context.configure({
-	device,
-	format: presentationFormat,
-});
-
-const module = device.createShaderModule({
-	code: /* wgsl */ `
-	struct Uniforms {
-		matrix: mat4x4f,
-	};
-
-	struct Color {
-		color: vec4f,
-	}
-
-	struct Vertex {
-		@location(0) position: vec4f,
-		// @location(1) color: vec4f,
-	};
-
-	struct VSOutput {
-		@builtin(position) position: vec4f,
-		@location(0) color: vec4f,
-	};
-
-	@group(0) @binding(0) var<uniform> uni: Uniforms;
-	@group(0) @binding(1) var<uniform> color: Color;
-
-	@vertex fn vs(vert: Vertex) -> VSOutput {
-		var vsOut: VSOutput;
-		vsOut.position = uni.matrix * vert.position;
-		vsOut.color = color.color;
-		return vsOut;
-	}
-
-	@fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
-		return vsOut.color;
-	}
-	`,
-});
-
-const pipeline = device.createRenderPipeline({
-	label: '3d transform pipeline',
-	layout: 'auto',
-	vertex: {
-		module,
-		buffers: [
-			{
-				arrayStride: 3 * 4, // 4 float * 4 byte
-				attributes: [
-					{shaderLocation: 0, offset: 0, format: 'float32x3'},
-					// {shaderLocation: 1, offset: 12, format: 'unorm8x4'},
-				],
-			},
-		],
-	},
-	fragment: {
-		module,
-		targets: [{format: presentationFormat}],
-	},
-	primitive: {
-		cullMode: 'front',
-		topology: 'line-list',
-	},
-	depthStencil: {
-		depthWriteEnabled: true,
-		depthCompare: 'less',
-		format: 'depth24plus',
-	},
-});
-
-const uniformBufferSize = (16) * 4;
-const uniformBuffer = device.createBuffer({
-	label: 'uniforms',
-	size: uniformBufferSize,
-	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-});
-const uniformValues = new Float32Array(uniformBufferSize / 4);
-// Offsets to the various uniform values in float32 indices
-const kMatrixOffset = 0;
-const matrixValue = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-const matrix = mat4.perspective(utils.degToRad(45), canvas.width / canvas.height, 1, 1000);
-const matLookat = mat4.lookAt([0, 0, 0], [0, -1, 0], [0, 1, 0]);
-const m1 = mat4.multiply(matrix, matLookat);
-matrixValue.set(m1);
-
-const colorBufferSize = (4) * 4;
-const colorBuffer = device.createBuffer({
-	label: 'color',
-	size: colorBufferSize,
-
-	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-});
-const colorValues = new Float32Array(colorBufferSize / 4);
-const colorValue = colorValues.subarray(kMatrixOffset, kMatrixOffset + 4);
-const color = new Float32Array([1, 0, 0, 1]);
-colorValue.set(color);
-device.queue.writeBuffer(colorBuffer, 0, colorValues);
-
-const {vertexData, numVertices} = createFvertices();
-const vertexBuffer = device.createBuffer({
-	label: 'vertex buffer vertices',
-	size: vertexData.byteLength,
-	usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(vertexBuffer, 0, vertexData);
-
-const bindGroup = device.createBindGroup({
-	label: 'bind group for object',
-	layout: pipeline.getBindGroupLayout(0),
-	entries: [
-		{binding: 0, resource: {buffer: uniformBuffer}},
-		{binding: 1, resource: {buffer: colorBuffer}},
-	],
-});
-
-const renderPassDescriptor = {
-	label: 'our basic canvas renderPass',
-	colorAttachments: [
-		{
-			// View: 렌더링 할 때 채워질 예정
-			view: null as unknown as GPUTextureView,
-			clearValue: [0.3, 0.3, 0.3, 1],
-			loadOp: 'clear' as GPULoadOp,
-			storeOp: 'store' as GPUStoreOp,
-		},
-	],
-	depthStencilAttachment: {
-		view: null as unknown as GPUTextureView,
-		depthClearValue: 1,
-		depthLoadOp: 'clear' as GPULoadOp,
-		depthStoreOp: 'store' as GPUStoreOp,
-	},
+const cubeSize = 0.8;
+const cubeNumber = 4;
+const pStart = -(cubeSize * (cubeNumber - 1) / 2);
+console.log(pStart);
+type Point = {
+	index: [number, number, number];
+	position: [number, number, number];
 };
+const initialPoint: Point[] = [];
+const lineVertices: number[] = [];
 
-let depthTexture: GPUTexture | undefined;
+for (let x = 0; x < cubeNumber; x++) {
+	for (let y = 0; y < cubeNumber; y++) {
+		for (let z = 0; z < cubeNumber; z++) {
+			const cx = pStart + (x * cubeSize);
+			const cy = pStart + (y * cubeSize);
+			const cz = pStart + (z * cubeSize);
+			const point: Point = {
+				index: [x, y, z],
+				position: [cx, cy, cz],
+			};
+			initialPoint.push(point);
 
-// 3d 모델 로드
-
-async function createSphere() {
-	const meshes = await loadSphere();
-
-	for (const mesh of meshes) {
-		const data = extractMeshDataFromThree(mesh);
-
-		if (!device) {
-			return;
-		}
-
-		const positionBuffer = createBuffer(device, data.positions, GPUBufferUsage.VERTEX);
-		const normalBuffer = data.normals ? createBuffer(device, data.normals, GPUBufferUsage.VERTEX) : null;
-		const uvBuffer = data.uvs ? createBuffer(device, data.uvs, GPUBufferUsage.VERTEX) : null;
-		const indexBuffer = data.indices ? createBuffer(device, data.indices, GPUBufferUsage.INDEX) : null;
-
-		const pipeline = createRenderPipeline(device); // 셰이더, 레이아웃 등 포함한 pipeline 생성
-
-		const commandEncoder = device.createCommandEncoder();
-		const textureView = context.getCurrentTexture().createView();
-
-		const renderPass = commandEncoder.beginRenderPass({
-			colorAttachments: [{
-				view: textureView,
-				loadOp: 'clear',
-				storeOp: 'store',
-				clearValue: {
-					r: 0.1, g: 0.1, b: 0.1, a: 1,
-				},
-			}],
-		});
-
-		renderPass.setPipeline(pipeline);
-		renderPass.setVertexBuffer(0, positionBuffer);
-		if (normalBuffer) {
-			renderPass.setVertexBuffer(1, normalBuffer);
-		}
-
-		if (uvBuffer) {
-			renderPass.setVertexBuffer(2, uvBuffer);
-		}
-
-		if (indexBuffer) {
-			renderPass.setIndexBuffer(indexBuffer, 'uint16'); // 혹은 'uint32'에 맞춰 조정
-			renderPass.drawIndexed(data.indices.length, 1, 0, 0, 0);
-		} else {
-			renderPass.draw(data.positions.length / 3, 1, 0, 0);
-		}
-
-		renderPass.end();
-		device.queue.submit([commandEncoder.finish()]);
-	}
-
-	function createBuffer(device: GPUDevice, data: Float32Array | Uint16Array | Uint32Array, usage: GPUBufferUsageFlags): GPUBuffer {
-		const buffer = device.createBuffer({
-			size: (data.byteLength + 3) & ~3, // 4바이트 정렬
-			usage,
-			mappedAtCreation: true,
-		});
-		const writeArray
-		= data instanceof Float32Array ? new Float32Array(buffer.getMappedRange())
-			: (data instanceof Uint16Array ? new Uint16Array(buffer.getMappedRange())
-				: new Uint32Array(buffer.getMappedRange()));
-		writeArray.set(data);
-		buffer.unmap();
-		return buffer;
-	}
-
-	function createRenderPipeline(device: GPUDevice): GPURenderPipeline {
-		const vertexShaderModule = device.createShaderModule({
-			code: /* wgsl */`
-			@vertex
-			fn main(
-				@location(0) position: vec3<f32>,
-				@location(1) normal: vec3<f32>,
-				@location(2) uv: vec2<f32>
-			) -> @builtin(position) vec4<f32> {
-				return vec4(position, 1.0);
+			// 오른쪽에 연결
+			if (x + 1 < cubeNumber) {
+				const nx = pStart + ((x + 1) * cubeSize);
+				lineVertices.push(cx, cy, cz, nx, cy, cz);
 			}
-		`,
-		});
 
-		const fragmentShaderModule = device.createShaderModule({
-			code: /* wgsl */ `
-			@fragment
-			fn main() -> @location(0) vec4<f32> {
-				return vec4(1.0, 0.8, 0.2, 1.0);
+			// 위쪽에 연결
+			if (y + 1 < cubeNumber) {
+				const ny = pStart + ((y + 1) * cubeSize);
+				lineVertices.push(cx, cy, cz, cx, ny, cz);
 			}
-		`,
-		});
 
-		return device.createRenderPipeline({
-			layout: 'auto',
-			vertex: {
-				module: vertexShaderModule,
-				entryPoint: 'main',
-				buffers: [
-					{
-						arrayStride: 12,
-						attributes: [{shaderLocation: 0, offset: 0, format: 'float32x3'}],
-					},
-					{
-						arrayStride: 12,
-						attributes: [{shaderLocation: 1, offset: 0, format: 'float32x3'}],
-					},
-					{
-						arrayStride: 8,
-						attributes: [{shaderLocation: 2, offset: 0, format: 'float32x2'}],
-					},
-				],
-			},
-			fragment: {
-				module: fragmentShaderModule,
-				entryPoint: 'main',
-				targets: [{format: navigator.gpu.getPreferredCanvasFormat()}],
-			},
-			primitive: {
-				topology: 'triangle-list',
-				cullMode: 'back',
-			},
-		});
+			// 앞쪽에 연결
+			if (z + 1 < cubeNumber) {
+				const nz = pStart + ((z + 1) * cubeSize);
+				lineVertices.push(cx, cy, cz, cx, cy, nz);
+			}
+		}
 	}
 }
 
-await createSphere();
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+// Gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineVertices), gl.STATIC_DRAW);
 
-render();
+const vertexShaderSource = `#version 300 es
+in vec3 a_position;
+in vec3 a_color;
+
+uniform mat4 u_matrix;
+uniform bool u_useVertexColor;
+uniform vec3 u_solidColor;
+
+out vec3 v_color;
+
+void main() {
+  gl_Position = u_matrix * vec4(a_position, 1.0);
+  v_color = u_useVertexColor ? a_color : u_solidColor;
+}
+`;
+
+const vertexShader = gl.createShader(gl.VERTEX_SHADER)!;
+gl.shaderSource(vertexShader, vertexShaderSource);
+gl.compileShader(vertexShader);
+
+const fragmentShaderSource = `#version 300 es
+precision mediump float;
+
+in vec3 v_color;
+out vec4 outColor;
+
+void main() {
+  outColor = vec4(v_color, 1.0);
+}
+`;
+
+const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER)!;
+gl.shaderSource(fragmentShader, fragmentShaderSource);
+gl.compileShader(fragmentShader);
+
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const uUseVertexColor = gl.getUniformLocation(program, 'u_useVertexColor');
+const uSolidColor = gl.getUniformLocation(program, 'u_solidColor');
+
+const aPosition = gl.getAttribLocation(program, 'a_position');
+// Gl.enableVertexAttribArray(a_position);
+// gl.vertexAttribPointer(a_position, 3, gl.FLOAT, false, 0, 0);
+
+const uMatrix = gl?.getUniformLocation(program, 'u_matrix');
+// Gl.useProgram(program);
+// gl.uniformMatrix4fv(u_matrix, false, vpMatrix);
+
+gl.clearColor(0.3, 0.3, 0.3, 1);
+// Gl.clear(gl.COLOR_BUFFER_BIT);
+// gl.drawArrays(gl.LINES, 0, lineVertices.length / 3);
+
+const cubes: Cube[] = [];
+for (const point of initialPoint) {
+	const cube = new Cube(gl, point.position, cubeSize * 0.1, vec3.fromValues(...point.index.map(i => i / (cubeNumber - 1))));
+	cubes.push(cube);
+}
+
+let model: Model | undefined;
+
+const loader = new GLTFLoader();
+loader.load('./sphere.glb', gltf => {
+	const mesh = gltf.scene.getObjectByProperty('type', 'Mesh') as Mesh;
+	const geometry = mesh.geometry;
+
+	const positionAttribute = geometry.getAttribute('position');
+	const colorAttribute = geometry.getAttribute('color'); // 색상 정보가 있는 경우만
+	const indexAttribute = geometry.getIndex();
+
+	const positions = positionAttribute.array;
+	const colors = colorAttribute ? colorAttribute.array : null;
+	const indices = indexAttribute?.array;
+	console.log(positions, colors, indices);
+	model = new Model(gl, new Float32Array(positions), indices ? new Uint16Array(indices) : new Uint16Array([]));
+});
 
 function render() {
-	if (!device) {
-		throw new Error('Need a browser that supports WebGPU');
+	if (!gl) {
+		return;
 	}
 
-	const canvasTexture = context.getCurrentTexture();
-	renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
+	const eye = vec3.create();
+	eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
+	eye[1] = distance * Math.sin(pitch);
+	eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
 
-	// If we don't have a depth texture OR if its size is different
-	// from the canvasTexture when make a new depth texture
-	if (!depthTexture
-			|| depthTexture.width !== canvasTexture.width
-			|| depthTexture.height !== canvasTexture.height) {
-		if (depthTexture) {
-			depthTexture.destroy();
-		}
+	const view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+	const proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
+	const vp = mat4.multiply(proj, view);
 
-		depthTexture = device.createTexture({
-			size: [canvasTexture.width, canvasTexture.height],
-			format: 'depth24plus',
-			usage: GPUTextureUsage.RENDER_ATTACHMENT,
-		});
+	gl.viewport(0, 0, canvas.width, canvas.height);
+	gl.enable(gl.DEPTH_TEST);
+	gl.enable(gl.CULL_FACE);
+	// eslint-disable-next-line no-bitwise
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+	gl.useProgram(program);
+	gl.uniformMatrix4fv(uMatrix, false, vp);
+
+	// === 선 그리기 ===
+	gl.useProgram(program);
+	gl.uniform1i(uUseVertexColor, 0); // Attribute 색상 사용 안 함
+	gl.uniform3fv(uSolidColor, [1, 1, 1]); // 흰색
+
+	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+	gl.enableVertexAttribArray(aPosition);
+	gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+	gl.drawArrays(gl.LINES, 0, lineVertices.length / 3);
+
+	// // === 큐브 그리기 ===
+	// gl.useProgram(program);
+	// gl.uniform1i(uUseVertexColor, 1); // 색상 사용 ON
+
+	// // 정점 버퍼
+	// gl.bindBuffer(gl.ARRAY_BUFFER, cubeVbo);
+	// gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+	// gl.enableVertexAttribArray(aPosition);
+
+	// // 색상 버퍼
+	// gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+	// gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+	// gl.enableVertexAttribArray(aColor);
+
+	// // 인덱스 버퍼
+	// gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIbo);
+
+	// MVP 매트릭스 및 그리기
+	// for (const point of initialPoint) {
+	// 	const model = mat4.translation(point.position);
+	// 	const mv*////* = mat4.multiply(vp, model);
+	// 	gl.uniformMatrix4fv(uMatrix, false, mvp);
+	// 	gl.drawElements(gl.TRIANGLES, cubeIndices.length, gl.UNSIGNED_SHORT, 0);
+	// }
+
+	for (const cube of cubes) {
+		const model = mat4.translation(cube.pos);
+		const mvp = mat4.multiply(vp, model);
+		cube.render(gl, mvp);
 	}
 
-	renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
-
-	const encoder = device.createCommandEncoder({label: 'our encoder'});
-	const pass = encoder.beginRenderPass(renderPassDescriptor);
-	pass.setPipeline(pipeline);
-	pass.setVertexBuffer(0, vertexBuffer);
-
-	const t = mat4.translation([0, 0, -400]);
-	const rX = mat4.rotationX(mouseInfo.rotationX);
-	const rY = mat4.rotationY(mouseInfo.rotationY);
-	const rZ = mat4.rotationZ(mouseInfo.rotationZ);
-	const rotationMatrix = mat4.multiply(rZ, mat4.multiply(rX, rY));
-
-	const s = mat4.scaling([1, 1, 1]);
-
-	const gridPosition = [0, 0, -0.5];
-	const tempMatrix = mat4.rotationY(utils.degToRad(0));
-	mat4.translate(tempMatrix, gridPosition, tempMatrix);
-	// console.log(eye);
-
-	const e = mat4.cameraAim([0, 0, 0], gridPosition, [0, 1, 0]);
-
-	const m = mat4.multiply(e, mat4.multiply(mat4.multiply(t, rotationMatrix), s));
-	matrixValue.set(mat4.multiply(matrix, m));
-
-	device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
-	pass.setBindGroup(0, bindGroup);
-	pass.draw(numVertices);
-
-	// 다른 pipeline도 설정하기
-	pass.end();
-
-	const commandBuffer = encoder.finish();
-	device.queue.submit([commandBuffer]);
+	model?.render(gl, vp);
 
 	requestAnimationFrame(render);
 }
 
-function createBuffer(device: GPUDevice, data: Float32Array | Uint16Array, usage: GPUBufferUsageFlags): GPUBuffer {
-	const buffer = device.createBuffer({
-		size: (data.byteLength + 3) & ~3,
-		usage,
-		mappedAtCreation: true,
-	});
-	const mapping = buffer.getMappedRange();
-	if (data instanceof Float32Array) {
-		new Float32Array(mapping).set(data);
-	} else {
-		new Uint16Array(mapping).set(data);
-	}
-
-	buffer.unmap();
-	return buffer;
-}
-
-function createFvertices() {
-	const s = cube.girdSize;
-	const positions = [
-		// 앞면
-		...new Point(-s, -s, s).array,
-		...new Point(s, -s, s).array,
-		...new Point(-s, s, s).array,
-		...new Point(s, s, s).array,
-		// 뒷면
-		...new Point(-s, -s, -s).array,
-		...new Point(-s, s, -s).array,
-		...new Point(s, -s, -s).array,
-		...new Point(s, s, -s).array,
-		// 윗면
-		...new Point(-s, s, -s).array,
-		...new Point(-s, s, s).array,
-		...new Point(s, s, -s).array,
-		...new Point(s, s, s).array,
-		// 밑면
-		...new Point(-s, -s, -s).array,
-		...new Point(s, -s, -s).array,
-		...new Point(-s, -s, s).array,
-		...new Point(s, -s, s).array,
-		// 오른쪽 면
-		...new Point(s, -s, -s).array,
-		...new Point(s, s, -s).array,
-		...new Point(s, -s, s).array,
-		...new Point(s, s, s).array,
-		// 왼쪽 면
-		...new Point(-s, -s, -s).array,
-		...new Point(-s, -s, s).array,
-		...new Point(-s, s, -s).array,
-		...new Point(-s, s, s).array,
-	];
-
-	const indices = [
-		// 앞면
-		...new Point(0, 1, 2).array,
-		...new Point(2, 1, 3).array,
-		// 뒷면
-		...new Point(4, 5, 6).array,
-		...new Point(6, 5, 7).array,
-		// 윗면
-		...new Point(8, 9, 10).array,
-		...new Point(10, 9, 11).array,
-		// 밑면
-		...new Point(12, 13, 14).array,
-		...new Point(14, 13, 15).array,
-		// 오른쪽 면
-		...new Point(16, 17, 18).array,
-		...new Point(18, 17, 19).array,
-		// 왼쪽 면
-		...new Point(20, 21, 22).array,
-		...new Point(22, 21, 23).array,
-	];
-
-	const cubeLength = 9;
-	const cubeOffset = s;
-
-	const numVertices = indices.length * (cubeLength ** 3);
-	const vertexData = new Float32Array(numVertices * 3);
-
-	for (let c = 0; c < cubeLength ** 3; c++) {
-		for (const [i, index] of indices.entries()) {
-			const positionNdx = index * 3;
-			const position = positions.slice(positionNdx, positionNdx + 3);
-			const x = c % cubeLength;
-			position[0] += x * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
-			const y = Math.floor(c / cubeLength) % cubeLength;
-			position[1] += y * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
-			const z = Math.floor(c / cubeLength ** 2);
-			position[2] += z * cubeOffset - cubeOffset * Math.floor(cubeLength / 2);
-			vertexData.set(position, (i + c * indices.length) * 3);
-		}
-	}
-	// for (const [i, index] of indices.entries()) {
-	// 	const positionNdx = index * 3;
-	// 	const position = positions.slice(positionNdx, positionNdx + 3);
-	// 	vertexData.set(position, i * 3);
-	// }
-
-	return {
-		vertexData,
-		numVertices,
-	};
-}
+render();

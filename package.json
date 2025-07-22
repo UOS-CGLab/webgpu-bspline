@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/delaunator": "^5.0.3",
     "@types/three": "^0.176.0",
+    "@types/xo": "^0.39.9",
     "@webgpu/types": "^0.1.52",
     "typescript": "~5.6.2",
     "vite": "^6.0.5",
