@@ -1,5 +1,5 @@
 import {
-	vec4, vec3, vec3n, mat4, type Mat4, type Vec3,
+	vec4, vec3n, mat4, type Mat4, type Vec3,
 } from 'wgpu-matrix';
 
 export default class Cube {
