@@ -1,4 +1,4 @@
-import {vec3, mat4} from 'wgpu-matrix';
+import {vec3, mat4, vec3n} from 'wgpu-matrix';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {type Mesh} from 'three';
 import Cube from './cube.js';
@@ -25,6 +25,9 @@ let distance = 5; // Distacne between camera and target
 let dragging = false;
 let lastX = 0;
 let lastY = 0;
+let currentX = -1;
+let currentY = -1;
+let currentPoint;
 
 canvas.addEventListener('mousedown', event => {
 	dragging = true;
@@ -37,8 +40,13 @@ canvas.addEventListener('mouseup', () => {
 });
 canvas.addEventListener('mouseleave', () => {
 	dragging = false;
+	currentX = -1;
+	currentY = -1;
 });
 canvas.addEventListener('mousemove', event => {
+	currentX = event.offsetX;
+	currentY = canvas.height - event.offsetY;
+
 	if (!dragging) {
 		return;
 	}
@@ -75,7 +83,7 @@ const pickingCubes: Cube[] = [];
 
 for (const point of points.info) {
 	const cube = new Cube(gl, point.position, gap * 0.1, vec3.fromValues(...point.index.map(i => i / (pointNumber - 1))));
-	const pickingCube = new Cube(pickingGl, point.position, gap * 0.1, vec3.fromValues(...point.index.map(i => i / (pointNumber - 1))));
+	const pickingCube = new Cube(pickingGl, point.position, gap * 0.1, vec3.fromValues(...point.index.map(i => i / 255)));
 	cubes.push(cube);
 	pickingCubes.push(pickingCube);
 }
@@ -117,7 +125,7 @@ function render() {
 	// eslint-disable-next-line no-bitwise
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-	// Render lines
+	// 선 렌더링하기
 	lines.render(gl, vp);
 
 	for (const cube of cubes) {
@@ -131,7 +139,7 @@ function render() {
 	requestAnimationFrame(render);
 }
 
-pickingGl.clearColor(0.3, 0.3, 0.3, 1);
+pickingGl.clearColor(1, 1, 1, 1);
 
 function renderPicking() {
 	if (!pickingGl) {
@@ -160,6 +168,18 @@ function renderPicking() {
 	}
 
 	pickingModel?.render(pickingGl, vp);
+
+	if (currentX >= 0 && currentY >= 0) {
+		const pixelData = new Uint8Array(4);
+
+		pickingGl.readPixels(
+			currentX, currentY, 1, 1, pickingGl.RGBA, pickingGl.UNSIGNED_BYTE, pixelData,
+		);
+
+		const [x, y, z] = [pixelData[0], pixelData[1], pixelData[2]];
+		const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
+		currentPoint = isCubeSelected ? vec3n.create(x, y, z) : undefined;
+	}
 
 	requestAnimationFrame(renderPicking);
 }
