@@ -1,4 +1,6 @@
-import {vec3, mat4, vec3n} from 'wgpu-matrix';
+import {
+	vec3, mat4, vec3n, type Vec3, type Vec3n,
+} from 'wgpu-matrix';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {type Mesh} from 'three';
 import Cube from './cube.js';
@@ -27,14 +29,26 @@ let lastX = 0;
 let lastY = 0;
 let currentX = -1;
 let currentY = -1;
-let currentPoint;
+let currentPoint: number[] | undefined;
+let selectedCube: Cube | undefined;
+
+const eye = vec3.create();
+let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+let proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
+let vp = mat4.multiply(proj, view);
 
 canvas.addEventListener('mousedown', event => {
 	dragging = true;
 	lastX = event.clientX;
 	lastY = event.clientY;
-});
 
+	if (currentPoint) {
+		const index = (currentPoint[0] * pointNumber * pointNumber) + (currentPoint[1] * pointNumber) + currentPoint[2];
+		selectedCube = cubes[index];
+	} else {
+		selectedCube = undefined;
+	}
+});
 canvas.addEventListener('mouseup', () => {
 	dragging = false;
 });
@@ -51,6 +65,14 @@ canvas.addEventListener('mousemove', event => {
 		return;
 	}
 
+	eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
+	eye[1] = distance * Math.sin(pitch);
+	eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
+
+	view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+	proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
+	vp = mat4.multiply(proj, view);
+
 	const dx = event.clientX - lastX;
 	const dy = event.clientY - lastY;
 	yaw -= dx * 0.01;
@@ -64,11 +86,6 @@ canvas.addEventListener('wheel', event => {
 	distance += event.deltaY * 0.01;
 	distance = Math.max(1, distance);
 });
-
-const eye = vec3.create();
-eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
-eye[1] = distance * Math.sin(pitch);
-eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
 
 const gap = 0.8;
 const pointNumber = 4;
@@ -110,15 +127,6 @@ function render() {
 		return;
 	}
 
-	const eye = vec3.create();
-	eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
-	eye[1] = distance * Math.sin(pitch);
-	eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
-
-	const view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-	const proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
-	const vp = mat4.multiply(proj, view);
-
 	gl.viewport(0, 0, canvas.width, canvas.height);
 	gl.enable(gl.DEPTH_TEST);
 	gl.enable(gl.CULL_FACE);
@@ -145,15 +153,6 @@ function renderPicking() {
 	if (!pickingGl) {
 		return;
 	}
-
-	const eye = vec3.create();
-	eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
-	eye[1] = distance * Math.sin(pitch);
-	eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
-
-	const view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-	const proj = mat4.perspective(45 * Math.PI / 180, pickingCanvas.width / pickingCanvas.height, 0.1, 100);
-	const vp = mat4.multiply(proj, view);
 
 	pickingGl.viewport(0, 0, pickingCanvas.width, pickingCanvas.height);
 	pickingGl.enable(pickingGl.DEPTH_TEST);
