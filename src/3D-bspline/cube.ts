@@ -3,140 +3,232 @@ import {
 } from 'wgpu-matrix';
 
 export default class Cube {
-	_vertices: Float32Array;
-	_indices: Uint16Array;
-	program: WebGLProgram;
-	vbo: WebGLBuffer;
-	ibo: WebGLBuffer;
+	private readonly pipeline: GPURenderPipeline;
+	private readonly bindGroup: GPUBindGroup;
+	private readonly vb: GPUBuffer;
+	private readonly ib: GPUBuffer;
+	private readonly indexCount: number;
 
-	aPosition: number;
-	uMatrix: WebGLUniformLocation;
-	uColor: WebGLUniformLocation;
-
-	private readonly _defaultVertices: number[][] = [
-		// 앞면
-		vec3n.create(-0.5, -0.5, 0.5),
-		vec3n.create(0.5, -0.5, 0.5),
-		vec3n.create(0.5, 0.5, 0.5),
-		vec3n.create(-0.5, 0.5, 0.5),
-		// 뒷면
-		vec3n.create(-0.5, -0.5, -0.5),
-		vec3n.create(0.5, -0.5, -0.5),
-		vec3n.create(0.5, 0.5, -0.5),
-		vec3n.create(-0.5, 0.5, -0.5),
-	];
-
-	private readonly _defaultIndices: number[][] = [
-		// 앞면
-		vec3n.create(0, 1, 2),
-		vec3n.create(0, 2, 3),
-		// 오른쪽
-		vec3n.create(1, 5, 6),
-		vec3n.create(1, 6, 2),
-		// 뒷면
-		vec3n.create(5, 4, 7),
-		vec3n.create(5, 7, 6),
-		// 왼쪽
-		vec3n.create(4, 0, 3),
-		vec3n.create(4, 3, 7),
-		// 위쪽
-		vec3n.create(3, 2, 6),
-		vec3n.create(3, 6, 7),
-		// 아래쪽
-		vec3n.create(4, 5, 1),
-		vec3n.create(4, 1, 0),
-	];
-
-	constructor(gl: WebGL2RenderingContext, public pos: number[], public scale: number, public color: Vec3) {
-		const vertexArray = [];
-
-		const mat = mat4.create();
-		mat4.identity(mat);
-		// Mat4.translate(mat, pos, mat);
-		mat4.scale(mat, [scale, scale, scale], mat);
-		mat4.translate(mat, mat, [
-			pos[0] / scale,
-			pos[1] / scale,
-			pos[2] / scale,
+	constructor(
+		public device: GPUDevice,
+		format: GPUTextureFormat,
+		pos: [number, number, number],
+		scale: number,
+		color: [number, number, number],
+		vpBuffer: GPUBuffer,
+		picking = false,
+	) {
+		// Geometry (24 verts -> 36 indices) — 포지션만
+		const positions = new Float32Array([
+			// Front
+			-0.5,
+			-0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			0.5,
+			// Back
+			-0.5,
+			-0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			-0.5,
+			// Left
+			-0.5,
+			-0.5,
+			-0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			// Right
+			0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+			// Top
+			-0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			// Bottom
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			-0.5,
+			0.5,
+		]);
+		const indices = new Uint16Array([
+			0,
+			1,
+			2,
+			0,
+			2,
+			3,
+			4,
+			5,
+			6,
+			4,
+			6,
+			7,
+			8,
+			9,
+			10,
+			8,
+			10,
+			11,
+			12,
+			13,
+			14,
+			12,
+			14,
+			15,
+			16,
+			17,
+			18,
+			16,
+			18,
+			19,
+			20,
+			21,
+			22,
+			20,
+			22,
+			23,
 		]);
 
-		for (const vertex of this._defaultVertices) {
-			const vec = vec4.create(...vertex, 1);
-			vec4.transformMat4(vec, mat, vec);
-			vertexArray.push(vec[0], vec[1], vec[2]);
-		}
+		// eslint-disable-next-line no-bitwise
+		this.vb = device.createBuffer({size: positions.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST});
+		device.queue.writeBuffer(this.vb, 0, positions);
+		// eslint-disable-next-line no-bitwise
+		this.ib = device.createBuffer({size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST});
+		device.queue.writeBuffer(this.ib, 0, indices);
+		this.indexCount = indices.length;
 
-		this._vertices = new Float32Array(vertexArray);
-		this._indices = new Uint16Array(this._defaultIndices.flat());
+		// Uniform buffers
+		const model = mat4.multiply(mat4.translation(pos), mat4.scaling([scale, scale, scale]));
+		// eslint-disable-next-line no-bitwise
+		const modelBuffer = device.createBuffer({size: 16 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+		device.queue.writeBuffer(modelBuffer, 0, model as unknown as ArrayBuffer);
 
-		// Vertex shader source
-		const vertexShaderSource = /* glsl */ `#version 300 es
-    precision mediump float;
-    in vec3 a_position;
+		// eslint-disable-next-line no-bitwise
+		const colorBuffer = device.createBuffer({size: 4 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+		const col = new Float32Array([color[0], color[1], color[2], 1]);
+		device.queue.writeBuffer(colorBuffer, 0, col);
 
-    uniform mat4 u_matrix;
+		// Shaders
+		const code = picking ? this.pickingWGSL() : this.colorWGSL();
 
-    out vec3 v_color;
+		this.pipeline = device.createRenderPipeline({
+			layout: 'auto',
+			vertex: {
+				module: device.createShaderModule({code}),
+				entryPoint: 'vs_main',
+				buffers: [{arrayStride: 12, attributes: [{shaderLocation: 0, format: 'float32x3', offset: 0}]}],
+			},
+			fragment: {module: device.createShaderModule({code}), entryPoint: 'fs_main', targets: [{format}]},
+			primitive: {topology: 'triangle-list', cullMode: 'back'},
+			depthStencil: {format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less'},
+		});
 
-    void main() {
-      gl_Position = u_matrix * vec4(a_position, 1.0);
-    }
-    `;
-
-		// Fragment shader source
-		const fragmentShaderSource = /* glsl */ `#version 300 es
-    precision mediump float;
-    uniform vec3 u_color;
-    out vec4 outColor;
-
-    void main() {
-      outColor = vec4(u_color, 1.0);
-    }
-    `;
-
-		// Vertex, Fragment shader 생성
-		const vertexShader = gl.createShader(gl.VERTEX_SHADER)!;
-		gl.shaderSource(vertexShader, vertexShaderSource);
-		gl.compileShader(vertexShader);
-
-		const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER)!;
-		gl.shaderSource(fragmentShader, fragmentShaderSource);
-		gl.compileShader(fragmentShader);
-
-		// Program 생성, shader 연결
-		const program = gl.createProgram();
-		gl.attachShader(program, vertexShader);
-		gl.attachShader(program, fragmentShader);
-		gl.linkProgram(program);
-
-		this.program = program;
-
-		this.aPosition = gl.getAttribLocation(this.program, 'a_position');
-		this.uMatrix = gl.getUniformLocation(this.program, 'u_matrix')!;
-		this.uColor = gl.getUniformLocation(this.program, 'u_color')!;
-
-		this.vbo = gl.createBuffer();
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-		gl.bufferData(gl.ARRAY_BUFFER, this._vertices, gl.STATIC_DRAW);
-
-		this.ibo = gl.createBuffer();
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
-		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this._indices, gl.STATIC_DRAW);
+		const layout = this.pipeline.getBindGroupLayout(0);
+		this.bindGroup = device.createBindGroup({
+			layout,
+			entries: [
+				{binding: 0, resource: {buffer: vpBuffer}},
+				{binding: 1, resource: {buffer: modelBuffer}},
+				{binding: 2, resource: {buffer: colorBuffer}},
+			],
+		});
 	}
 
-	render(gl: WebGL2RenderingContext, viewProjectionMatrix: Mat4) {
-		gl.useProgram(this.program);
+	encode(pass: GPURenderPassEncoder) {
+		pass.setPipeline(this.pipeline);
+		pass.setBindGroup(0, this.bindGroup);
+		pass.setVertexBuffer(0, this.vb);
+		pass.setIndexBuffer(this.ib, 'uint16');
+		pass.drawIndexed(this.indexCount);
+	}
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-		gl.enableVertexAttribArray(this.aPosition);
-		gl.vertexAttribPointer(this.aPosition, 3, gl.FLOAT, false, 0, 0);
+	// eslint-disable-next-line @typescript-eslint/naming-convention
+	private colorWGSL() {
+		return /* wgsl */ `
+		struct VSU { vp: mat4x4<f32>, model: mat4x4<f32> };
+		@group(0) @binding(0) var<uniform> u_vp: mat4x4<f32>;
+		@group(0) @binding(1) var<uniform> u_model: mat4x4<f32>;
+		struct ColorU { rgb: vec3<f32>, _pad: f32 };
+		@group(0) @binding(2) var<uniform> u_color: ColorU;
 
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+		struct VSOut { @builtin(position) pos: vec4<f32>, @location(0) v: vec3<f32> };
+		@vertex fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+			var o: VSOut;
+			let w = u_model * vec4<f32>(p, 1.0);
+			o.pos = u_vp * w;
+			o.v = u_color.rgb;
+			return o;
+		}
+		@fragment fn fs_main(i: VSOut) -> @location(0) vec4<f32> { return vec4<f32>(i.v, 1.0); }
+    `;
+	}
 
-		// 색상 attribute 위치 가져오기
-		gl.uniform3fv(this.uColor, this.color);
+	// eslint-disable-next-line @typescript-eslint/naming-convention
+	private pickingWGSL() {
+		return /* wgsl */ `
+		@group(0) @binding(0) var<uniform> u_vp: mat4x4<f32>;
+		@group(0) @binding(1) var<uniform> u_model: mat4x4<f32>;
+		struct ColorU { rgb: vec3<f32>, _pad: f32 };
+		@group(0) @binding(2) var<uniform> u_color: ColorU;
 
-		gl.uniformMatrix4fv(this.uMatrix, false, viewProjectionMatrix);
-		gl.drawElements(gl.TRIANGLES, this._indices.length, gl.UNSIGNED_SHORT, 0);
+		struct VSOut { @builtin(position) pos: vec4<f32> };
+		@vertex fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+			var o: VSOut;
+			let w = u_model * vec4<f32>(p, 1.0);
+			o.pos = u_vp * w;
+			return o;
+		}
+		@fragment fn fs_main() -> @location(0) vec4<f32> { return vec4<f32>(u_color.rgb, 1.0); }
+    `;
 	}
 }
+
