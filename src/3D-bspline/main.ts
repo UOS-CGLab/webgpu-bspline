@@ -95,7 +95,6 @@ canvas.addEventListener('mousemove', event => {
 	lastX = event.clientX;
 	lastY = event.clientY;
 });
-
 canvas.addEventListener('wheel', event => {
 	distance += event.deltaY * 0.01;
 	distance = Math.max(1, distance);
@@ -146,19 +145,26 @@ for (const p of pointsInfo) {
 	pickingCubes.push(new Cube(pickingDevice, pickingFormat, p.position, gap * 0.1, pickColor, pickingVpBuffer, /* picking */ true));
 }
 
-// Let model: Model | undefined;
-// let pickingModel: Model | undefined;
-// const loader = new GLTFLoader();
-// loader.load('./sphere.glb', gltf => {
-// 	const mesh = gltf.scene.getObjectByProperty('type', 'Mesh') as Mesh;
-// 	const geometry = mesh.geometry;
-// 	const positionAttribute = geometry.getAttribute('position');
-// 	const indexAttribute = geometry.getIndex();
-// 	const positions = positionAttribute.array;
-// 	const indices = indexAttribute?.array;
-// 	model = new Model(context, new Float32Array(positions), indices ? new Uint16Array(indices) : new Uint16Array([]));
-// 	pickingModel = new Model(pickingGl, new Float32Array(positions), indices ? new Uint16Array(indices) : new Uint16Array([]));
-// });
+// ===== Lines (draw only) =====
+const lines = new Lines(device, format, new Points(pointNumber, gap), vpBuffer);
+
+let model: Model | undefined;
+let pickingModel: Model | undefined;
+const loader = new GLTFLoader();
+loader.load('./sphere.glb', gltf => {
+	const mesh = gltf.scene.getObjectByProperty('type', 'Mesh') as Mesh;
+	const geometry = mesh.geometry;
+	const positionAttribute = geometry.getAttribute('position');
+	const indexAttribute = geometry.getIndex();
+	if (indexAttribute === null) {
+		throw new Error('Index attribute is required for model rendering');
+	}
+
+	const positions = positionAttribute.array;
+	const indices = indexAttribute?.array;
+	model = new Model(device, format, new Float32Array(positions), new Uint16Array(indices), vpBuffer);
+	pickingModel = new Model(pickingDevice, pickingFormat, new Float32Array(positions), new Uint16Array(indices), vpBuffer);
+});
 
 // ===== Picking readback buffer (1px) =====
 // eslint-disable-next-line no-bitwise
@@ -212,10 +218,16 @@ function render() {
 	});
 
 	// Lines.render(context, vp) 대체: 라인은 별도 파이프라인 필요. (여기서는 생략)
+	// === Lines 그리기 추가 ===
+	lines.encode(pass);
 
 	// 큐브 렌더링
 	for (const cube of cubes) {
 		cube.encode(pass);
+	}
+
+	if (model) {
+		model.encode(pass);
 	}
 
 	// 모델 렌더링(간단 예시 — Cube 파이프라인과 동일 포맷을 쓰려면 전용 파이프라인을 만들어야 함)
@@ -226,7 +238,7 @@ function render() {
 	requestAnimationFrame(render);
 }
 
-function renderPicking() {
+async function renderPicking() {
 	pickingDevice.queue.writeBuffer(pickingVpBuffer, 0, vp as unknown as ArrayBuffer);
 
 	const encoder = pickingDevice.createCommandEncoder();
@@ -252,6 +264,10 @@ function renderPicking() {
 		cube.encode(pass);
 	}
 
+	if (pickingModel) {
+		pickingModel.encode(pass);
+	}
+
 	pass.end();
 
 	if (currentX >= 0 && currentY >= 0) {
@@ -266,18 +282,18 @@ function renderPicking() {
 	pickingDevice.queue.submit([encoder.finish()]);
 
 	// 결과 읽기
-	// if (currentX >= 0 && currentY >= 0) {
-	// 	readbackPixel.mapAsync(GPUMapMode.READ).then(() => {
-	// 		const d = new Uint8Array(readbackPixel.getMappedRange());
-	// 		const [x, y, z] = [d[0], d[1], d[2]];
-	// 		readbackPixel.unmap();
-	// 		const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
-	// 		currentPoint = isCubeSelected ? (vec3n.create(x, y, z) as unknown as number[]) : undefined;
-	// 	});
-	// }
+	if (currentX >= 0 && currentY >= 0) {
+		await readbackPixel.mapAsync(GPUMapMode.READ).then(() => {
+			const d = new Uint8Array(readbackPixel.getMappedRange());
+			const [x, y, z] = [d[0], d[1], d[2]];
+			readbackPixel.unmap();
+			const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
+			currentPoint = isCubeSelected ? (vec3n.create(x, y, z) as unknown as number[]) : undefined;
+		});
+	}
 
 	requestAnimationFrame(renderPicking);
 }
 
 render();
-// RenderPicking();
+await renderPicking();
