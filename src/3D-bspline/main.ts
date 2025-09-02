@@ -1,5 +1,5 @@
 import {
-	vec3, mat4, vec3n, type Vec3, type Vec3n,
+	vec3, mat4, vec3n, type Vec3, type Mat4, quat
 } from 'wgpu-matrix';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {type Mesh} from 'three';
@@ -35,26 +35,48 @@ const pickingCanvas: HTMLCanvasElement = document.querySelector('#picking')!;
 const [context, device, format] = await getWebGpuContext(canvas);
 const [pickingContext, pickingDevice, pickingFormat] = await getWebGpuContext(pickingCanvas);
 
-let yaw = 0; // Left right rotation
-let pitch = 0; // Up down rotation
+// let yaw = 0; // Left right rotation
+// let pitch = 0; // Up down rotation
+// const limit = Math.PI / 2 - 0.001;
+// pitch = Math.max(-limit, Math.min(limit, pitch));
 let distance = 5; // Distacne between camera and target
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-let currentX = -1;
-let currentY = -1;
+// let dragging = false;
+// let lastX = 0;
+// let lastY = 0;
+// let currentX = -1;
+// let currentY = -1;
 let currentPoint: number[] | undefined;
 let selectedCube: Cube | undefined;
 
-const eye = vec3.create();
-let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-let proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
-let vp = mat4.multiply(proj, view);
+// const eye = vec3.create();
+// let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+// let proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
+// let vp = mat4.create();
+// mat4.multiply(vp, proj, view);
+
+let rotation = quat.identity();   // Arcball 누적 회전
+let dragging = false;
+let lastPos: Vec3 | null = null;
+
+function projectToArcball(x: number, y: number, width: number, height: number): Vec3 {
+  const nx = (2 * x - width) / width;
+  const ny = (height - 2 * y) / height; // y 뒤집기
+  const length2 = nx * nx + ny * ny;
+  let nz;
+
+  if (length2 <= 1.0) {
+    nz = Math.sqrt(1.0 - length2);
+  } else {
+    const length = Math.sqrt(length2);
+    return vec3.normalize([nx / length, ny / length, 0]);
+  }
+
+  return vec3.normalize([nx, ny, nz]);
+}
 
 canvas.addEventListener('mousedown', event => {
 	dragging = true;
-	lastX = event.clientX;
-	lastY = event.clientY;
+  lastPos = projectToArcball(event.clientX, event.clientY, canvas.width, canvas.height);
 
 	if (currentPoint) {
 		const index = (currentPoint[0] * pointNumber * pointNumber) + (currentPoint[1] * pointNumber) + currentPoint[2];
@@ -65,40 +87,64 @@ canvas.addEventListener('mousedown', event => {
 });
 canvas.addEventListener('mouseup', () => {
 	dragging = false;
+	lastPos = null;
 });
 canvas.addEventListener('mouseleave', () => {
 	dragging = false;
-	currentX = -1;
-	currentY = -1;
+	lastPos = null;
 });
 canvas.addEventListener('mousemove', event => {
-	currentX = event.offsetX;
-	currentY = canvas.height - event.offsetY;
+  if (!dragging || !lastPos) return;
 
-	if (!dragging) {
-		return;
-	}
+  let currPos = projectToArcball(event.clientX, event.clientY, canvas.width, canvas.height);
 
-	eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
-	eye[1] = distance * Math.sin(pitch);
-	eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
+	// 반구 보정
+  if (vec3.dot(lastPos, currPos) < 0) {
+    currPos = vec3.scale(currPos, -1);
+  }
 
-	view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-	proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
-	vp = mat4.multiply(proj, view);
+  // 회전축 & 각도
+  let axis = vec3.cross(lastPos, currPos);
+  const dot = vec3.dot(lastPos, currPos);
+  let angle = Math.acos(Math.min(1, Math.max(-1, dot)));
 
-	const dx = event.clientX - lastX;
-	const dy = event.clientY - lastY;
-	yaw -= dx * 0.01;
-	pitch += dy * 0.01;
-	pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
-	lastX = event.clientX;
-	lastY = event.clientY;
+  if (vec3.len(axis) > 1e-6) {
+		axis = vec3.scale(axis, -1);
+
+		const speed = 20.0;
+		angle *= speed;
+
+    const dq = quat.fromAxisAngle(axis, angle);
+    rotation = quat.normalize(quat.mul(rotation, dq));
+  }
+
+  lastPos = currPos;
 });
 canvas.addEventListener('wheel', event => {
 	distance += event.deltaY * 0.01;
 	distance = Math.max(1, distance);
 });
+
+function getViewProjection(): Mat4 {
+  const target = [0, 0, 0];
+  const baseEye = [0, 0, distance];
+  const baseUp = [0, 1, 0];
+
+  // Arcball 회전을 eye와 up 벡터에 적용
+  const eye = vec3.transformQuat(baseEye, rotation);
+  const up = vec3.transformQuat(baseUp, rotation);
+
+  const view = mat4.lookAt(eye, target, up);
+
+  const proj = mat4.perspective(
+    (45 * Math.PI) / 180,
+    canvas.width / canvas.height,
+    0.1,
+    100
+  );
+
+  return mat4.mul(proj, view);
+}
 
 const gap = 0.8;
 const pointNumber = 4;
@@ -193,6 +239,7 @@ function ensureDepths() {
 
 function render() {
 	ensureDepths();
+	const vp = getViewProjection();
 	device.queue.writeBuffer(vpBuffer, 0, vp.buffer);
 
 	const encoder = device.createCommandEncoder();
@@ -211,7 +258,7 @@ function render() {
 		],
 		depthStencilAttachment: {
 			view: depthMain.createView(),
-			depthClearValue: 1,
+			depthClearValue: 1.0,
 			depthLoadOp: 'clear',
 			depthStoreOp: 'store',
 		},
@@ -238,62 +285,63 @@ function render() {
 	requestAnimationFrame(render);
 }
 
-async function renderPicking() {
-	pickingDevice.queue.writeBuffer(pickingVpBuffer, 0, vp as unknown as ArrayBuffer);
+// async function renderPicking() {
+// 	const vp = getViewProjection();
+// 	pickingDevice.queue.writeBuffer(pickingVpBuffer, 0, vp as unknown as ArrayBuffer);
 
-	const encoder = pickingDevice.createCommandEncoder();
-	const view = pickingContext.getCurrentTexture().createView();
+// 	const encoder = pickingDevice.createCommandEncoder();
+// 	const view = pickingContext.getCurrentTexture().createView();
 
-	const pass = encoder.beginRenderPass({
-		colorAttachments: [
-			{
-				view, clearValue: {
-					r: 1, g: 1, b: 1, a: 1,
-				}, loadOp: 'clear', storeOp: 'store',
-			},
-		],
-		depthStencilAttachment: {
-			view: depthPick.createView(),
-			depthClearValue: 1,
-			depthLoadOp: 'clear',
-			depthStoreOp: 'store',
-		},
-	});
+// 	const pass = encoder.beginRenderPass({
+// 		colorAttachments: [
+// 			{
+// 				view, clearValue: {
+// 					r: 1, g: 1, b: 1, a: 1,
+// 				}, loadOp: 'clear', storeOp: 'store',
+// 			},
+// 		],
+// 		depthStencilAttachment: {
+// 			view: depthPick.createView(),
+// 			depthClearValue: 1,
+// 			depthLoadOp: 'clear',
+// 			depthStoreOp: 'store',
+// 		},
+// 	});
 
-	for (const cube of pickingCubes) {
-		cube.encode(pass);
-	}
+// 	for (const cube of pickingCubes) {
+// 		cube.encode(pass);
+// 	}
 
-	if (pickingModel) {
-		pickingModel.encode(pass);
-	}
+// 	if (pickingModel) {
+// 		pickingModel.encode(pass);
+// 	}
 
-	pass.end();
+// 	pass.end();
 
-	if (currentX >= 0 && currentY >= 0) {
-		// 현재 프레임 버퍼에서 (x,y) 1픽셀을 readbackPixel로 복사
-		encoder.copyTextureToBuffer(
-			{texture: pickingContext.getCurrentTexture(), origin: {x: currentX, y: currentY}},
-			{buffer: readbackPixel, bytesPerRow: 4},
-			{width: 1, height: 1},
-		);
-	}
+// 	if (currentX >= 0 && currentY >= 0) {
+// 		// 현재 프레임 버퍼에서 (x,y) 1픽셀을 readbackPixel로 복사
+// 		encoder.copyTextureToBuffer(
+// 			{texture: pickingContext.getCurrentTexture(), origin: {x: currentX, y: currentY}},
+// 			{buffer: readbackPixel, bytesPerRow: 4},
+// 			{width: 1, height: 1},
+// 		);
+// 	}
 
-	pickingDevice.queue.submit([encoder.finish()]);
+// 	pickingDevice.queue.submit([encoder.finish()]);
 
-	// 결과 읽기
-	if (currentX >= 0 && currentY >= 0) {
-		await readbackPixel.mapAsync(GPUMapMode.READ).then(() => {
-			const d = new Uint8Array(readbackPixel.getMappedRange());
-			const [x, y, z] = [d[0], d[1], d[2]];
-			readbackPixel.unmap();
-			const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
-			currentPoint = isCubeSelected ? (vec3n.create(x, y, z) as unknown as number[]) : undefined;
-		});
-	}
+// 	// 결과 읽기
+// 	if (currentX >= 0 && currentY >= 0) {
+// 		await readbackPixel.mapAsync(GPUMapMode.READ).then(() => {
+// 			const d = new Uint8Array(readbackPixel.getMappedRange());
+// 			const [x, y, z] = [d[0], d[1], d[2]];
+// 			readbackPixel.unmap();
+// 			const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
+// 			currentPoint = isCubeSelected ? (vec3n.create(x, y, z) as unknown as number[]) : undefined;
+// 		});
+// 	}
 
-	requestAnimationFrame(renderPicking);
-}
+// 	requestAnimationFrame(renderPicking);
+// }
 
 render();
-await renderPicking();
+// await renderPicking();
