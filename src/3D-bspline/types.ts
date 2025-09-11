@@ -1,6 +1,6 @@
-import {type Vec3n} from 'wgpu-matrix';
+import { type Vec3n } from "wgpu-matrix";
 
 export type PointInfo = {
-	index: Vec3n;
-	position: Vec3n;
+  index: Vec3n;
+  position: Vec3n;
 };

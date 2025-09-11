@@ -18,8 +18,7 @@
     "@types/xo": "^0.39.9",
     "@webgpu/types": "^0.1.52",
     "typescript": "~5.6.2",
-    "vite": "^6.0.5",
-    "xo": "^0.60.0"
+    "vite": "^6.0.5"
   },
   "dependencies": {
     "delaunator": "^5.0.1",

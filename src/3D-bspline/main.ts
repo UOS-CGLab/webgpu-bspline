@@ -1,39 +1,41 @@
-import {
-	vec3, mat4, vec3n, type Vec3, type Mat4, quat
-} from 'wgpu-matrix';
-import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
-import {type Mesh} from 'three';
-import Cube from './cube.js';
-import Model from './model.js';
-import Points from './points.js';
-import Lines from './lines.js';
+import { vec3, mat4, vec3n, type Vec3, type Mat4, quat } from "wgpu-matrix";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { type Mesh } from "three";
+import Cube from "./cube.js";
+import Model from "./model.js";
+import Points from "./points.js";
+import Lines from "./lines.js";
 
-async function getWebGpuContext(canvas: HTMLCanvasElement): Promise<[GPUCanvasContext, GPUDevice, GPUTextureFormat]> {
-	const adapter = await navigator.gpu?.requestAdapter();
-	if (!adapter) {
-		throw new Error('No WebGPU adapter found');
-	}
+async function getWebGpuContext(
+  canvas: HTMLCanvasElement
+): Promise<[GPUCanvasContext, GPUDevice, GPUTextureFormat]> {
+  const adapter = await navigator.gpu?.requestAdapter();
+  if (!adapter) {
+    throw new Error("No WebGPU adapter found");
+  }
 
-	const device = await adapter.requestDevice();
-	const context = canvas.getContext('webgpu')!;
-	if (!context) {
-		throw new Error('No webgl2 context');
-	}
+  const device = await adapter.requestDevice();
+  const context = canvas.getContext("webgpu")!;
+  if (!context) {
+    throw new Error("No webgl2 context");
+  }
 
-	const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-	context.configure({
-		device,
-		format: presentationFormat,
-		alphaMode: 'premultiplied',
-	});
+  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  context.configure({
+    device,
+    format: presentationFormat,
+    alphaMode: "premultiplied",
+  });
 
-	return [context, device, presentationFormat];
+  return [context, device, presentationFormat];
 }
 
-const canvas: HTMLCanvasElement = document.querySelector('#canvas')!;
-const pickingCanvas: HTMLCanvasElement = document.querySelector('#picking')!;
+const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
+const pickingCanvas: HTMLCanvasElement = document.querySelector("#picking")!;
 const [context, device, format] = await getWebGpuContext(canvas);
-const [pickingContext, pickingDevice, pickingFormat] = await getWebGpuContext(pickingCanvas);
+const [pickingContext, pickingDevice, pickingFormat] = await getWebGpuContext(
+  pickingCanvas
+);
 
 // let yaw = 0; // Left right rotation
 // let pitch = 0; // Up down rotation
@@ -54,11 +56,16 @@ let selectedCube: Cube | undefined;
 // let vp = mat4.create();
 // mat4.multiply(vp, proj, view);
 
-let rotation = quat.identity();   // Arcball 누적 회전
+let rotation = quat.identity(); // Arcball 누적 회전
 let dragging = false;
 let lastPos: Vec3 | null = null;
 
-function projectToArcball(x: number, y: number, width: number, height: number): Vec3 {
+function projectToArcball(
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): Vec3 {
   const nx = (2 * x - width) / width;
   const ny = (height - 2 * y) / height; // y 뒤집기
   const length2 = nx * nx + ny * ny;
@@ -74,31 +81,44 @@ function projectToArcball(x: number, y: number, width: number, height: number): 
   return vec3.normalize([nx, ny, nz]);
 }
 
-canvas.addEventListener('mousedown', event => {
-	dragging = true;
-  lastPos = projectToArcball(event.clientX, event.clientY, canvas.width, canvas.height);
+canvas.addEventListener("mousedown", (event) => {
+  dragging = true;
+  lastPos = projectToArcball(
+    event.clientX,
+    event.clientY,
+    canvas.width,
+    canvas.height
+  );
 
-	if (currentPoint) {
-		const index = (currentPoint[0] * pointNumber * pointNumber) + (currentPoint[1] * pointNumber) + currentPoint[2];
-		selectedCube = cubes[index];
-	} else {
-		selectedCube = undefined;
-	}
+  if (currentPoint) {
+    const index =
+      currentPoint[0] * pointNumber * pointNumber +
+      currentPoint[1] * pointNumber +
+      currentPoint[2];
+    selectedCube = cubes[index];
+  } else {
+    selectedCube = undefined;
+  }
 });
-canvas.addEventListener('mouseup', () => {
-	dragging = false;
-	lastPos = null;
+canvas.addEventListener("mouseup", () => {
+  dragging = false;
+  lastPos = null;
 });
-canvas.addEventListener('mouseleave', () => {
-	dragging = false;
-	lastPos = null;
+canvas.addEventListener("mouseleave", () => {
+  dragging = false;
+  lastPos = null;
 });
-canvas.addEventListener('mousemove', event => {
+canvas.addEventListener("mousemove", (event) => {
   if (!dragging || !lastPos) return;
 
-  let currPos = projectToArcball(event.clientX, event.clientY, canvas.width, canvas.height);
+  let currPos = projectToArcball(
+    event.clientX,
+    event.clientY,
+    canvas.width,
+    canvas.height
+  );
 
-	// 반구 보정
+  // 반구 보정
   if (vec3.dot(lastPos, currPos) < 0) {
     currPos = vec3.scale(currPos, -1);
   }
@@ -109,10 +129,10 @@ canvas.addEventListener('mousemove', event => {
   let angle = Math.acos(Math.min(1, Math.max(-1, dot)));
 
   if (vec3.len(axis) > 1e-6) {
-		axis = vec3.scale(axis, -1);
+    axis = vec3.scale(axis, -1);
 
-		const speed = 20.0;
-		angle *= speed;
+    const speed = 20.0;
+    angle *= speed;
 
     const dq = quat.fromAxisAngle(axis, angle);
     rotation = quat.normalize(quat.mul(rotation, dq));
@@ -120,9 +140,9 @@ canvas.addEventListener('mousemove', event => {
 
   lastPos = currPos;
 });
-canvas.addEventListener('wheel', event => {
-	distance += event.deltaY * 0.01;
-	distance = Math.max(1, distance);
+canvas.addEventListener("wheel", (event) => {
+  distance += event.deltaY * 0.01;
+  distance = Math.max(1, distance);
 });
 
 function getViewProjection(): Mat4 {
@@ -150,45 +170,78 @@ const gap = 0.8;
 const pointNumber = 4;
 
 // WebGL Points/Lines 대체: 내부에서 점 격자 생성
-const pointsInfo: Array<{position: [number, number, number]; index: [number, number, number]}> = [];
+const pointsInfo: Array<{
+  position: [number, number, number];
+  index: [number, number, number];
+}> = [];
 for (let x = 0; x < pointNumber; x++) {
-	for (let y = 0; y < pointNumber; y++) {
-		for (let z = 0; z < pointNumber; z++) {
-			pointsInfo.push({
-				position: [
-					(x - ((pointNumber - 1) / 2)) * gap,
-					(y - ((pointNumber - 1) / 2)) * gap,
-					(z - ((pointNumber - 1) / 2)) * gap,
-				],
-				index: [x, y, z],
-			});
-		}
-	}
+  for (let y = 0; y < pointNumber; y++) {
+    for (let z = 0; z < pointNumber; z++) {
+      pointsInfo.push({
+        position: [
+          (x - (pointNumber - 1) / 2) * gap,
+          (y - (pointNumber - 1) / 2) * gap,
+          (z - (pointNumber - 1) / 2) * gap,
+        ],
+        index: [x, y, z],
+      });
+    }
+  }
 }
 
 // ===== Shared uniform buffers =====
 // vp buffer (모든 큐브/모델이 공유)
 // eslint-disable-next-line no-bitwise
-const vpBuffer = device.createBuffer({size: 16 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+const vpBuffer = device.createBuffer({
+  size: 16 * 4,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
 // eslint-disable-next-line no-bitwise
-const pickingVpBuffer = pickingDevice.createBuffer({size: 16 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+const pickingVpBuffer = pickingDevice.createBuffer({
+  size: 16 * 4,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
 
 // ===== Depth textures =====
-let depthMain = device.createTexture({size: {width: canvas.width, height: canvas.height}, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT});
-let depthPick = pickingDevice.createTexture({size: {width: pickingCanvas.width, height: pickingCanvas.height}, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT});
+let depthMain = device.createTexture({
+  size: { width: canvas.width, height: canvas.height },
+  format: "depth24plus",
+  usage: GPUTextureUsage.RENDER_ATTACHMENT,
+});
+let depthPick = pickingDevice.createTexture({
+  size: { width: pickingCanvas.width, height: pickingCanvas.height },
+  format: "depth24plus",
+  usage: GPUTextureUsage.RENDER_ATTACHMENT,
+});
 
 // ===== Cubes (draw + picking) =====
 const cubes: Cube[] = [];
 const pickingCubes: Cube[] = [];
 for (const p of pointsInfo) {
-	const normalColor: [number, number, number] = [
-		p.index[0] / (pointNumber - 1),
-		p.index[1] / (pointNumber - 1),
-		p.index[2] / (pointNumber - 1),
-	];
-	const pickColor: [number, number, number] = [p.index[0] / 255, p.index[1] / 255, p.index[2] / 255];
-	cubes.push(new Cube(device, format, p.position, gap * 0.1, normalColor, vpBuffer));
-	pickingCubes.push(new Cube(pickingDevice, pickingFormat, p.position, gap * 0.1, pickColor, pickingVpBuffer, /* picking */ true));
+  const normalColor: [number, number, number] = [
+    p.index[0] / (pointNumber - 1),
+    p.index[1] / (pointNumber - 1),
+    p.index[2] / (pointNumber - 1),
+  ];
+  const pickColor: [number, number, number] = [
+    p.index[0] / 255,
+    p.index[1] / 255,
+    p.index[2] / 255,
+  ];
+  cubes.push(
+    new Cube(device, format, p.position, gap * 0.1, normalColor, vpBuffer)
+  );
+  pickingCubes.push(
+    new Cube(
+      pickingDevice,
+      pickingFormat,
+      p.position,
+      gap * 0.1,
+      pickColor,
+      pickingVpBuffer,
+      /* picking */ true
+    )
+  );
 }
 
 // ===== Lines (draw only) =====
@@ -197,92 +250,113 @@ const lines = new Lines(device, format, new Points(pointNumber, gap), vpBuffer);
 let model: Model | undefined;
 let pickingModel: Model | undefined;
 const loader = new GLTFLoader();
-loader.load('./sphere.glb', gltf => {
-	const mesh = gltf.scene.getObjectByProperty('type', 'Mesh') as Mesh;
-	const geometry = mesh.geometry;
-	const positionAttribute = geometry.getAttribute('position');
-	const indexAttribute = geometry.getIndex();
-	if (indexAttribute === null) {
-		throw new Error('Index attribute is required for model rendering');
-	}
+loader.load("./sphere.glb", (gltf) => {
+  const mesh = gltf.scene.getObjectByProperty("type", "Mesh") as Mesh;
+  const geometry = mesh.geometry;
+  const positionAttribute = geometry.getAttribute("position");
+  const indexAttribute = geometry.getIndex();
+  if (indexAttribute === null) {
+    throw new Error("Index attribute is required for model rendering");
+  }
 
-	const positions = positionAttribute.array;
-	const indices = indexAttribute?.array;
-	model = new Model(device, format, new Float32Array(positions), new Uint16Array(indices), vpBuffer);
-	pickingModel = new Model(pickingDevice, pickingFormat, new Float32Array(positions), new Uint16Array(indices), vpBuffer);
+  const positions = positionAttribute.array;
+  const indices = indexAttribute?.array;
+  model = new Model(
+    device,
+    format,
+    new Float32Array(positions),
+    new Uint16Array(indices),
+    vpBuffer
+  );
+  pickingModel = new Model(
+    pickingDevice,
+    pickingFormat,
+    new Float32Array(positions),
+    new Uint16Array(indices),
+    vpBuffer
+  );
 });
 
 // ===== Picking readback buffer (1px) =====
 // eslint-disable-next-line no-bitwise
-const readbackPixel = pickingDevice.createBuffer({size: 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ});
+const readbackPixel = pickingDevice.createBuffer({
+  size: 4,
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+});
 
 // ===== Render loops =====
 function ensureDepths() {
-	if (depthMain.width !== canvas.width || depthMain.height !== canvas.height) {
-		depthMain.destroy();
-		depthMain = device.createTexture({
-			size: {width: canvas.width, height: canvas.height},
-			format: 'depth24plus',
-			usage: GPUTextureUsage.RENDER_ATTACHMENT,
-		});
-	}
+  if (depthMain.width !== canvas.width || depthMain.height !== canvas.height) {
+    depthMain.destroy();
+    depthMain = device.createTexture({
+      size: { width: canvas.width, height: canvas.height },
+      format: "depth24plus",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
 
-	if (depthPick.width !== pickingCanvas.width || depthPick.height !== pickingCanvas.height) {
-		depthPick.destroy();
-		depthPick = pickingDevice.createTexture({
-			size: {width: pickingCanvas.width, height: pickingCanvas.height},
-			format: 'depth24plus',
-			usage: GPUTextureUsage.RENDER_ATTACHMENT,
-		});
-	}
+  if (
+    depthPick.width !== pickingCanvas.width ||
+    depthPick.height !== pickingCanvas.height
+  ) {
+    depthPick.destroy();
+    depthPick = pickingDevice.createTexture({
+      size: { width: pickingCanvas.width, height: pickingCanvas.height },
+      format: "depth24plus",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
 }
 
 function render() {
-	ensureDepths();
-	const vp = getViewProjection();
-	device.queue.writeBuffer(vpBuffer, 0, vp.buffer);
+  ensureDepths();
+  const vp = getViewProjection();
+  device.queue.writeBuffer(vpBuffer, 0, vp.buffer);
 
-	const encoder = device.createCommandEncoder();
-	const view = context.getCurrentTexture().createView();
+  const encoder = device.createCommandEncoder();
+  const view = context.getCurrentTexture().createView();
 
-	const pass = encoder.beginRenderPass({
-		colorAttachments: [
-			{
-				view,
-				clearValue: {
-					r: 0.3, g: 0.3, b: 0.3, a: 1,
-				},
-				loadOp: 'clear',
-				storeOp: 'store',
-			},
-		],
-		depthStencilAttachment: {
-			view: depthMain.createView(),
-			depthClearValue: 1.0,
-			depthLoadOp: 'clear',
-			depthStoreOp: 'store',
-		},
-	});
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view,
+        clearValue: {
+          r: 0.3,
+          g: 0.3,
+          b: 0.3,
+          a: 1,
+        },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthMain.createView(),
+      depthClearValue: 1.0,
+      depthLoadOp: "clear",
+      depthStoreOp: "store",
+    },
+  });
 
-	// Lines.render(context, vp) 대체: 라인은 별도 파이프라인 필요. (여기서는 생략)
-	// === Lines 그리기 추가 ===
-	lines.encode(pass);
+  // Lines.render(context, vp) 대체: 라인은 별도 파이프라인 필요. (여기서는 생략)
+  // === Lines 그리기 추가 ===
+  lines.encode(pass);
 
-	// 큐브 렌더링
-	for (const cube of cubes) {
-		cube.encode(pass);
-	}
+  // 큐브 렌더링
+  for (const cube of cubes) {
+    cube.encode(pass);
+  }
 
-	if (model) {
-		model.encode(pass);
-	}
+  if (model) {
+    model.encode(pass);
+  }
 
-	// 모델 렌더링(간단 예시 — Cube 파이프라인과 동일 포맷을 쓰려면 전용 파이프라인을 만들어야 함)
-	// if (modelVB) { /* draw modelVB/modelIB with 전용 파이프라인 */ }
+  // 모델 렌더링(간단 예시 — Cube 파이프라인과 동일 포맷을 쓰려면 전용 파이프라인을 만들어야 함)
+  // if (modelVB) { /* draw modelVB/modelIB with 전용 파이프라인 */ }
 
-	pass.end();
-	device.queue.submit([encoder.finish()]);
-	requestAnimationFrame(render);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  requestAnimationFrame(render);
 }
 
 // async function renderPicking() {
