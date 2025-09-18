@@ -7,7 +7,8 @@ import Points from "./points.js";
 import Lines from "./lines.js";
 
 async function getWebGpuContext(
-  canvas: HTMLCanvasElement
+  canvas: HTMLCanvasElement,
+  picking = false
 ): Promise<[GPUCanvasContext, GPUDevice, GPUTextureFormat]> {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) {
@@ -21,11 +22,17 @@ async function getWebGpuContext(
   }
 
   const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  context.configure({
+  const contextConfig = {
     device,
     format: presentationFormat,
     alphaMode: "premultiplied",
-  });
+  } as GPUCanvasConfiguration;
+
+  if (picking) {
+    contextConfig.usage =
+      GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC;
+  }
+  context.configure(contextConfig);
 
   return [context, device, presentationFormat];
 }
@@ -34,62 +41,37 @@ const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
 const pickingCanvas: HTMLCanvasElement = document.querySelector("#picking")!;
 const [context, device, format] = await getWebGpuContext(canvas);
 const [pickingContext, pickingDevice, pickingFormat] = await getWebGpuContext(
-  pickingCanvas
+  pickingCanvas,
+  true
 );
 
-// let yaw = 0; // Left right rotation
-// let pitch = 0; // Up down rotation
-// const limit = Math.PI / 2 - 0.001;
-// pitch = Math.max(-limit, Math.min(limit, pitch));
-let distance = 5; // Distacne between camera and target
-// let dragging = false;
-// let lastX = 0;
-// let lastY = 0;
-// let currentX = -1;
-// let currentY = -1;
-let currentPoint: number[] | undefined;
-let selectedCube: Cube | undefined;
+// --- 상태 변수 (Arcball 대신 사용할 변수들) ---
+let yaw = 0; // Y축 기준 좌우 회전 (radians)
+let pitch = 0; // X축 기준 상하 회전 (radians)
+let distance = 5; // 카메라와 타겟 사이의 거리
 
-// const eye = vec3.create();
-// let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-// let proj = mat4.perspective(45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100);
-// let vp = mat4.create();
-// mat4.multiply(vp, proj, view);
-
-let rotation = quat.identity(); // Arcball 누적 회전
 let dragging = false;
-let lastPos: Vec3 | null = null;
+let lastX = 0; // 마지막 마우스 X 좌표
+let lastY = 0; // 마지막 마우스 Y 좌표
 
-function projectToArcball(
-  x: number,
-  y: number,
-  width: number,
-  height: number
-): Vec3 {
-  const nx = (2 * x - width) / width;
-  const ny = (height - 2 * y) / height; // y 뒤집기
-  const length2 = nx * nx + ny * ny;
-  let nz;
+// --- 피킹 관련 상태 변수 추가 ---
+let currentX = -1; // 현재 마우스 X 좌표 (피킹용)
+let currentY = -1; // 현재 마우스 Y 좌표 (피킹용)
+let currentPoint: number[] | undefined; // 피킹된 큐브의 인덱스 [x, y, z]
+let selectedCube: Cube | undefined; // 피킹된 큐브 객체
+let isPicking = false; // 중복 피킹 방지 플래그
 
-  if (length2 <= 1.0) {
-    nz = Math.sqrt(1.0 - length2);
-  } else {
-    const length = Math.sqrt(length2);
-    return vec3.normalize([nx / length, ny / length, 0]);
-  }
+// --- 마지막으로 로그한 큐브의 인덱스를 저장할 변수 추가 ---
+let lastLoggedPoint: number[] | undefined;
 
-  return vec3.normalize([nx, ny, nz]);
-}
+// --- 이벤트 리스너 ---
 
 canvas.addEventListener("mousedown", (event) => {
   dragging = true;
-  lastPos = projectToArcball(
-    event.clientX,
-    event.clientY,
-    canvas.width,
-    canvas.height
-  );
+  lastX = event.clientX;
+  lastY = event.clientY;
 
+  // 객체 선택 로직은 그대로 유지
   if (currentPoint) {
     const index =
       currentPoint[0] * pointNumber * pointNumber +
@@ -100,62 +82,190 @@ canvas.addEventListener("mousedown", (event) => {
     selectedCube = undefined;
   }
 });
+
 canvas.addEventListener("mouseup", () => {
   dragging = false;
-  lastPos = null;
 });
+
 canvas.addEventListener("mouseleave", () => {
   dragging = false;
-  lastPos = null;
 });
+
 canvas.addEventListener("mousemove", (event) => {
-  if (!dragging || !lastPos) return;
+  // 현재 마우스 위치 업데이트 (피킹용)
+  currentX = event.clientX;
+  currentY = event.clientY;
 
-  let currPos = projectToArcball(
-    event.clientX,
-    event.clientY,
-    canvas.width,
-    canvas.height
-  );
-
-  // 반구 보정
-  if (vec3.dot(lastPos, currPos) < 0) {
-    currPos = vec3.scale(currPos, -1);
+  // 피킹 함수 호출 (중복 실행 방지)
+  if (!isPicking) {
+    performPicking();
   }
 
-  // 회전축 & 각도
-  let axis = vec3.cross(lastPos, currPos);
-  const dot = vec3.dot(lastPos, currPos);
-  let angle = Math.acos(Math.min(1, Math.max(-1, dot)));
+  if (!dragging) return;
 
-  if (vec3.len(axis) > 1e-6) {
-    axis = vec3.scale(axis, -1);
+  // 이전 위치와 현재 위치의 차이(delta) 계산
+  const deltaX = event.clientX - lastX;
+  const deltaY = event.clientY - lastY;
 
-    const speed = 20.0;
-    angle *= speed;
+  // 마우스 이동량을 yaw와 pitch에 누적
+  const rotationSpeed = 0.005; // 회전 감도 조절
+  yaw -= deltaX * rotationSpeed;
+  pitch += deltaY * rotationSpeed;
 
-    const dq = quat.fromAxisAngle(axis, angle);
-    rotation = quat.normalize(quat.mul(rotation, dq));
-  }
+  // Pitch(상하 회전)가 90도를 넘어가지 않도록 제한 (카메라 뒤집힘 방지)
+  const limit = Math.PI / 2 - 0.01;
+  pitch = Math.max(-limit, Math.min(limit, pitch));
 
-  lastPos = currPos;
+  // 다음 프레임을 위해 현재 마우스 위치 저장
+  lastX = event.clientX;
+  lastY = event.clientY;
 });
+
 canvas.addEventListener("wheel", (event) => {
   distance += event.deltaY * 0.01;
-  distance = Math.max(1, distance);
+  distance = Math.max(1, distance); // 최소 거리 제한
 });
+
+async function performPicking() {
+  isPicking = true; // 피킹 시작
+
+  // 캔버스 크기가 0이면 피킹 중단
+  if (pickingCanvas.width === 0 || pickingCanvas.height === 0) {
+    isPicking = false;
+    return;
+  }
+
+  const vp = getViewProjection();
+  pickingDevice.queue.writeBuffer(
+    pickingVpBuffer,
+    0,
+    vp as unknown as ArrayBuffer
+  );
+
+  const encoder = pickingDevice.createCommandEncoder();
+  const view = pickingContext.getCurrentTexture().createView();
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view,
+        clearValue: { r: 1, g: 1, b: 1, a: 1 },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthPick.createView(),
+      depthClearValue: 1,
+      depthLoadOp: "clear",
+      depthStoreOp: "store",
+    },
+  });
+
+  for (const cube of pickingCubes) {
+    cube.encode(pass);
+  }
+  if (pickingModel) {
+    pickingModel.encode(pass);
+  }
+  pass.end();
+
+  // 현재 마우스 위치의 1픽셀을 readbackPixel 버퍼로 복사
+  encoder.copyTextureToBuffer(
+    {
+      texture: pickingContext.getCurrentTexture(),
+      origin: { x: currentX, y: currentY },
+    },
+    { buffer: readbackPixel, bytesPerRow: 256 }, // bytesPerRow는 256의 배수여야 함
+    { width: 1, height: 1 }
+  );
+
+  pickingDevice.queue.submit([encoder.finish()]);
+  await pickingDevice.queue.onSubmittedWorkDone();
+
+  // 결과 읽기
+  await readbackPixel.mapAsync(GPUMapMode.READ);
+  const d = new Uint8Array(readbackPixel.getMappedRange());
+  const [x, y, z] = [d[0], d[1], d[2]]; // RGBA 중 RGB 값만 사용
+  readbackPixel.unmap();
+
+  const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
+  currentPoint = isCubeSelected ? [x, y, z] : undefined;
+
+  // 선택된 큐브 객체 업데이트
+  if (currentPoint) {
+    const index =
+      currentPoint[0] * pointNumber * pointNumber +
+      currentPoint[1] * pointNumber +
+      currentPoint[2];
+    selectedCube = cubes[index];
+  } else {
+    selectedCube = undefined;
+  }
+
+  isPicking = false; // 피킹 완료
+}
+
+// 디버깅용 렌더링 함수
+function renderPickingForDebug() {
+  if (pickingCanvas.width === 0 || pickingCanvas.height === 0) {
+    return;
+  }
+
+  const vp = getViewProjection();
+  pickingDevice.queue.writeBuffer(
+    pickingVpBuffer,
+    0,
+    vp as unknown as ArrayBuffer
+  );
+
+  const encoder = pickingDevice.createCommandEncoder();
+  const view = pickingContext.getCurrentTexture().createView();
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view,
+        clearValue: { r: 1, g: 1, b: 1, a: 1 },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthPick.createView(),
+      depthClearValue: 1,
+      depthLoadOp: "clear",
+      depthStoreOp: "store",
+    },
+  });
+
+  for (const cube of pickingCubes) {
+    cube.encode(pass);
+  }
+  if (pickingModel) {
+    pickingModel.encode(pass);
+  }
+  pass.end();
+
+  pickingDevice.queue.submit([encoder.finish()]);
+}
+
+// --- View-Projection 행렬 계산 함수 ---
 
 function getViewProjection(): Mat4 {
   const target = [0, 0, 0];
-  const baseEye = [0, 0, distance];
-  const baseUp = [0, 1, 0];
+  const up = [0, 1, 0];
+  const eye = vec3.create();
 
-  // Arcball 회전을 eye와 up 벡터에 적용
-  const eye = vec3.transformQuat(baseEye, rotation);
-  const up = vec3.transformQuat(baseUp, rotation);
+  // yaw와 pitch를 이용해 구면 좌표계(Spherical Coordinates)에서 카메라 위치 계산
+  eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
+  eye[1] = distance * Math.sin(pitch);
+  eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
 
+  // View 행렬 생성
   const view = mat4.lookAt(eye, target, up);
 
+  // Projection 행렬 생성
   const proj = mat4.perspective(
     (45 * Math.PI) / 180,
     canvas.width / canvas.height,
@@ -163,6 +273,7 @@ function getViewProjection(): Mat4 {
     100
   );
 
+  // View와 Projection 행렬을 곱하여 반환
   return mat4.mul(proj, view);
 }
 
@@ -191,12 +302,10 @@ for (let x = 0; x < pointNumber; x++) {
 
 // ===== Shared uniform buffers =====
 // vp buffer (모든 큐브/모델이 공유)
-// eslint-disable-next-line no-bitwise
 const vpBuffer = device.createBuffer({
   size: 16 * 4,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
-// eslint-disable-next-line no-bitwise
 const pickingVpBuffer = pickingDevice.createBuffer({
   size: 16 * 4,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -273,7 +382,7 @@ loader.load("./sphere.glb", (gltf) => {
     pickingFormat,
     new Float32Array(positions),
     new Uint16Array(indices),
-    vpBuffer
+    pickingVpBuffer
   );
 });
 
@@ -309,6 +418,22 @@ function ensureDepths() {
 }
 
 function render() {
+  // 현재 선택된 큐브(currentPoint)가 이전에 로그한 큐브(lastLoggedPoint)와 다를 때만 실행
+  // JSON.stringify는 간단하게 배열의 내용까지 비교하기 위해 사용합니다.
+  if (JSON.stringify(currentPoint) !== JSON.stringify(lastLoggedPoint)) {
+    if (currentPoint) {
+      // 선택된 큐브가 있으면 해당 인덱스를 콘솔에 출력
+      console.log(`✅ Cube hovered at index: [${currentPoint.join(", ")}]`);
+    } else {
+      // 선택된 큐브가 없으면(마우스가 빈 공간에 있으면) 메시지 출력
+      console.log("💨 No cube hovered.");
+    }
+    // 마지막으로 로그한 상태를 현재 상태로 업데이트
+    lastLoggedPoint = currentPoint;
+  }
+
+  renderPickingForDebug();
+
   ensureDepths();
   const vp = getViewProjection();
   device.queue.writeBuffer(vpBuffer, 0, vp.buffer);
