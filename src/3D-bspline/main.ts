@@ -1,10 +1,60 @@
-import { vec3, mat4, vec3n, type Vec3, type Mat4, quat } from "wgpu-matrix";
+import { vec3, mat4, type Vec3, type Mat4 } from "wgpu-matrix";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { type Mesh } from "three";
-import Cube from "./cube.js";
-import Model from "./model.js";
-import Points from "./points.js";
-import Lines from "./lines.js";
+import Cube from "./cube";
+import Model from "./model";
+import Lines from "./lines";
+
+// --- 큐브 선택 및 UI 상태 변수 ---
+let activelySelectedCube: Cube | undefined = undefined;
+let activelySelectedIndex: [number, number, number] | undefined = undefined;
+let unselectedCubeOpacity = 0.1;
+
+// --- 렌더링 상태 변수 추가 ---
+let showCubes = true;
+let showLines = true;
+let showModel = true;
+
+// --- HTML 요소 및 이벤트 리스너 설정 ---
+const showCubesCheckbox = document.getElementById(
+  "show-cubes"
+) as HTMLInputElement;
+const showLinesCheckbox = document.getElementById(
+  "show-lines"
+) as HTMLInputElement;
+const showModelCheckbox = document.getElementById(
+  "show-model"
+) as HTMLInputElement;
+const showDebugCheckbox = document.getElementById(
+  "show-debug"
+) as HTMLInputElement;
+const opacitySlider = document.getElementById(
+  "opacity-slider"
+) as HTMLInputElement;
+const selectionInfoDiv = document.getElementById(
+  "selection-info"
+) as HTMLDivElement;
+const cubeSelector = document.getElementById(
+  "cube-selector"
+) as HTMLSelectElement; // 드롭다운 추가
+
+showCubesCheckbox.addEventListener("change", () => {
+  showCubes = showCubesCheckbox.checked;
+});
+showLinesCheckbox.addEventListener("change", () => {
+  showLines = showLinesCheckbox.checked;
+});
+showModelCheckbox.addEventListener("change", () => {
+  showModel = showModelCheckbox.checked;
+});
+showDebugCheckbox.addEventListener("change", () => {
+  const pickingCanvas = document.getElementById("picking") as HTMLCanvasElement;
+  pickingCanvas.classList.toggle("invisible");
+});
+opacitySlider.addEventListener("input", () => {
+  unselectedCubeOpacity = parseFloat(opacitySlider.value);
+  updateCubeAppearances(); // 선택되지 않은 큐브 투명도 업데이트
+});
 
 async function getWebGpuContext(
   canvas: HTMLCanvasElement,
@@ -51,6 +101,7 @@ let pitch = 0; // X축 기준 상하 회전 (radians)
 let distance = 5; // 카메라와 타겟 사이의 거리
 
 let dragging = false;
+let isDraggingCube = false; // 큐브 드래그 상태 추가
 let lastX = 0; // 마지막 마우스 X 좌표
 let lastY = 0; // 마지막 마우스 Y 좌표
 
@@ -59,64 +110,208 @@ let currentX = -1; // 현재 마우스 X 좌표 (피킹용)
 let currentY = -1; // 현재 마우스 Y 좌표 (피킹용)
 let currentPoint: number[] | undefined; // 피킹된 큐브의 인덱스 [x, y, z]
 let selectedCube: Cube | undefined; // 피킹된 큐브 객체
+let hoveredCube: Cube | undefined; // 마우스 호버 중인 큐브
 let isPicking = false; // 중복 피킹 방지 플래그
 
-// --- 마지막으로 로그한 큐브의 인덱스를 저장할 변수 추가 ---
-let lastLoggedPoint: number[] | undefined;
+// --- 헬퍼 함수 ---
+function updateSelectionInfo() {
+  if (activelySelectedIndex) {
+    selectionInfoDiv.textContent = `Selected Cube Index: [${activelySelectedIndex.join(
+      ", "
+    )}]`;
+  } else {
+    selectionInfoDiv.textContent = "Selected Cube Index: None";
+  }
+}
+
+function updateCubeAppearances() {
+  if (!showCubes) {
+    // 큐브를 숨겨야 하면 모든 큐브의 투명도를 0으로 설정
+    cubes.forEach((cube) => cube.setOpacity(0));
+    return;
+  }
+
+  if (activelySelectedCube) {
+    cubes.forEach((cube) => {
+      const opacity =
+        cube === activelySelectedCube ? 1.0 : unselectedCubeOpacity;
+      cube.setOpacity(opacity);
+    });
+  } else {
+    // 선택된 큐브가 없으면 모두 1.0으로 표시
+    cubes.forEach((cube) => cube.setOpacity(1.0));
+  }
+}
 
 // --- 이벤트 리스너 ---
-
 canvas.addEventListener("mousedown", (event) => {
-  dragging = true;
   lastX = event.clientX;
   lastY = event.clientY;
 
-  // 객체 선택 로직은 그대로 유지
-  if (currentPoint) {
-    const index =
-      currentPoint[0] * pointNumber * pointNumber +
-      currentPoint[1] * pointNumber +
-      currentPoint[2];
-    selectedCube = cubes[index];
+  if (event.shiftKey && hoveredCube) {
+    isDraggingCube = true;
+    dragging = false;
+    activelySelectedCube = hoveredCube; // 드래그 시작 시 해당 큐브를 선택
+    const index = cubes.indexOf(activelySelectedCube);
+    const z = Math.floor(index / (pointNumber * pointNumber));
+    const y = Math.floor((index % (pointNumber * pointNumber)) / pointNumber);
+    const x = index % pointNumber;
+    activelySelectedIndex = [x, y, z];
+
+    updateCubeAppearances();
+    updateSelectionInfo();
+  } else if (hoveredCube) {
+    // 일반 클릭 (선택 토글)
+    if (hoveredCube === activelySelectedCube) {
+      // 이미 선택된 큐브를 다시 클릭하면 선택 해제
+      activelySelectedCube = undefined;
+      activelySelectedIndex = undefined;
+    } else {
+      activelySelectedCube = hoveredCube;
+      const index = cubes.indexOf(activelySelectedCube);
+      const z = Math.floor(index / (pointNumber * pointNumber));
+      const y = Math.floor((index % (pointNumber * pointNumber)) / pointNumber);
+      const x = index % pointNumber;
+      activelySelectedIndex = [x, y, z];
+    }
+    updateCubeAppearances();
+    updateSelectionInfo();
+    dragging = false; // 선택 시에는 카메라 회전 방지
   } else {
-    selectedCube = undefined;
+    dragging = true;
+    isDraggingCube = false;
+  }
+});
+
+window.addEventListener("keydown", (event) => {
+  if (!activelySelectedIndex) return;
+
+  const key = event.key;
+  if (!key.startsWith("Arrow")) return;
+
+  const target = [0, 0, 0],
+    up = [0, 1, 0];
+  const eye = vec3.create(
+    distance * Math.cos(pitch) * Math.sin(yaw),
+    distance * Math.sin(pitch),
+    distance * Math.cos(pitch) * Math.cos(yaw)
+  );
+  const viewMatrix = mat4.lookAt(eye, target, up);
+  const cameraRight = vec3.fromValues(
+    viewMatrix[0],
+    viewMatrix[4],
+    viewMatrix[8]
+  );
+  const cameraUp = vec3.fromValues(viewMatrix[1], viewMatrix[5], viewMatrix[9]);
+
+  let moveDir: Vec3;
+  if (key === "ArrowRight") moveDir = cameraRight;
+  else if (key === "ArrowLeft") moveDir = vec3.negate(cameraRight);
+  else if (key === "ArrowUp") moveDir = cameraUp;
+  else if (key === "ArrowDown") moveDir = vec3.negate(cameraUp);
+  else return;
+
+  const worldAxes = [
+    vec3.fromValues(1, 0, 0),
+    vec3.fromValues(-1, 0, 0),
+    vec3.fromValues(0, 1, 0),
+    vec3.fromValues(0, -1, 0),
+    vec3.fromValues(0, 0, 1),
+    vec3.fromValues(0, 0, -1),
+  ];
+
+  let maxDot = -Infinity;
+  let bestAxis = vec3.create();
+  for (const axis of worldAxes) {
+    const dot = vec3.dot(moveDir, axis);
+    if (dot > maxDot) {
+      maxDot = dot;
+      bestAxis = axis;
+    }
+  }
+
+  const newIndex: [number, number, number] = [...activelySelectedIndex];
+  newIndex[0] += bestAxis[0];
+  newIndex[1] += bestAxis[1];
+  newIndex[2] += bestAxis[2];
+
+  if (newIndex.every((v) => v >= 0 && v < pointNumber)) {
+    activelySelectedIndex = newIndex;
+    const flatIndex =
+      newIndex[2] * pointNumber * pointNumber +
+      newIndex[1] * pointNumber +
+      newIndex[0];
+    activelySelectedCube = cubes[flatIndex];
+    updateCubeAppearances();
+    updateSelectionInfo();
   }
 });
 
 canvas.addEventListener("mouseup", () => {
   dragging = false;
+  isDraggingCube = false; // <<-- 큐브 드래그 상태도 초기화
 });
 
 canvas.addEventListener("mouseleave", () => {
   dragging = false;
+  isDraggingCube = false; // <<-- 큐브 드래그 상태도 초기화
 });
 
 canvas.addEventListener("mousemove", (event) => {
-  // 현재 마우스 위치 업데이트 (피킹용)
-  currentX = event.clientX;
-  currentY = event.clientY;
+  const rect = canvas.getBoundingClientRect();
+  currentX = Math.floor(event.clientX - rect.left);
+  currentY = Math.floor(event.clientY - rect.top);
 
-  // 피킹 함수 호출 (중복 실행 방지)
   if (!isPicking) {
-    performPicking();
+    if (
+      currentX >= 0 &&
+      currentX < canvas.width &&
+      currentY >= 0 &&
+      currentY < canvas.height
+    ) {
+      performPicking();
+    }
   }
 
-  if (!dragging) return;
-
-  // 이전 위치와 현재 위치의 차이(delta) 계산
   const deltaX = event.clientX - lastX;
   const deltaY = event.clientY - lastY;
 
-  // 마우스 이동량을 yaw와 pitch에 누적
-  const rotationSpeed = 0.005; // 회전 감도 조절
-  yaw -= deltaX * rotationSpeed;
-  pitch += deltaY * rotationSpeed;
+  if (isDraggingCube && activelySelectedCube) {
+    const target = [0, 0, 0],
+      up = [0, 1, 0];
+    const eye = vec3.create(
+      distance * Math.cos(pitch) * Math.sin(yaw),
+      distance * Math.sin(pitch),
+      distance * Math.cos(pitch) * Math.cos(yaw)
+    );
+    const viewMatrix = mat4.lookAt(eye, target, up);
+    const cameraRight = vec3.fromValues(
+      viewMatrix[0],
+      viewMatrix[4],
+      viewMatrix[8]
+    );
+    const cameraUp = vec3.fromValues(
+      viewMatrix[1],
+      viewMatrix[5],
+      viewMatrix[9]
+    );
+    const dragSpeed = 0.01;
+    const moveVector = vec3.create();
+    vec3.addScaled(moveVector, cameraRight, deltaX * dragSpeed, moveVector);
+    vec3.addScaled(moveVector, cameraUp, -deltaY * dragSpeed, moveVector);
+    const newPosition = vec3.add(activelySelectedCube.position, moveVector);
+    activelySelectedCube.updatePosition([...newPosition]);
+    const index = cubes.indexOf(activelySelectedCube);
+    if (index > -1) pickingCubes[index].updatePosition([...newPosition]);
+    lines.updateVertices(cubes);
+  } else if (dragging) {
+    const rotationSpeed = 0.005;
+    yaw -= deltaX * rotationSpeed;
+    pitch += deltaY * rotationSpeed;
+    const limit = Math.PI / 2 - 0.01;
+    pitch = Math.max(-limit, Math.min(limit, pitch));
+  }
 
-  // Pitch(상하 회전)가 90도를 넘어가지 않도록 제한 (카메라 뒤집힘 방지)
-  const limit = Math.PI / 2 - 0.01;
-  pitch = Math.max(-limit, Math.min(limit, pitch));
-
-  // 다음 프레임을 위해 현재 마우스 위치 저장
   lastX = event.clientX;
   lastY = event.clientY;
 });
@@ -127,83 +322,72 @@ canvas.addEventListener("wheel", (event) => {
 });
 
 async function performPicking() {
-  isPicking = true; // 피킹 시작
-
-  // 캔버스 크기가 0이면 피킹 중단
-  if (pickingCanvas.width === 0 || pickingCanvas.height === 0) {
-    isPicking = false;
-    return;
-  }
-
-  const vp = getViewProjection();
-  pickingDevice.queue.writeBuffer(
-    pickingVpBuffer,
-    0,
-    vp as unknown as ArrayBuffer
-  );
-
-  const encoder = pickingDevice.createCommandEncoder();
-  const view = pickingContext.getCurrentTexture().createView();
-
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [
-      {
-        view,
-        clearValue: { r: 1, g: 1, b: 1, a: 1 },
-        loadOp: "clear",
-        storeOp: "store",
+  if (isPicking) return;
+  isPicking = true;
+  try {
+    if (pickingCanvas.width === 0 || pickingCanvas.height === 0) return;
+    const vp = getViewProjection();
+    pickingDevice.queue.writeBuffer(
+      pickingVpBuffer,
+      0,
+      vp as unknown as ArrayBuffer
+    );
+    const encoder = pickingDevice.createCommandEncoder();
+    const view = pickingContext.getCurrentTexture().createView();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view,
+          clearValue: { r: 1, g: 1, b: 1, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+      depthStencilAttachment: {
+        view: depthPick.createView(),
+        depthClearValue: 1,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
       },
-    ],
-    depthStencilAttachment: {
-      view: depthPick.createView(),
-      depthClearValue: 1,
-      depthLoadOp: "clear",
-      depthStoreOp: "store",
-    },
-  });
+    });
 
-  for (const cube of pickingCubes) {
-    cube.encode(pass);
+    if (showCubes) {
+      for (const cube of pickingCubes) cube.encode(pass);
+    }
+    if (showModel && pickingModel) pickingModel.encode(pass);
+    pass.end();
+
+    encoder.copyTextureToBuffer(
+      {
+        texture: pickingContext.getCurrentTexture(),
+        origin: { x: currentX, y: currentY },
+      },
+      { buffer: readbackPixel, bytesPerRow: 256 },
+      { width: 1, height: 1 }
+    );
+    pickingDevice.queue.submit([encoder.finish()]);
+    await pickingDevice.queue.onSubmittedWorkDone();
+    await readbackPixel.mapAsync(GPUMapMode.READ);
+    const d = new Uint8Array(readbackPixel.getMappedRange());
+    const [x, y, z] = [d[0], d[1], d[2]];
+    readbackPixel.unmap();
+    const isCubeSelected =
+      x < pointNumber && y < pointNumber && z < pointNumber;
+    currentPoint = isCubeSelected && showCubes ? [x, y, z] : undefined;
+    if (currentPoint) {
+      const index =
+        currentPoint[2] * pointNumber * pointNumber +
+        currentPoint[1] * pointNumber +
+        currentPoint[0];
+      hoveredCube = cubes[index];
+    } else {
+      hoveredCube = undefined;
+    }
+  } catch (e) {
+    console.error("Picking Error:", e);
+  } finally {
+    isPicking = false;
   }
-  if (pickingModel) {
-    pickingModel.encode(pass);
-  }
-  pass.end();
-
-  // 현재 마우스 위치의 1픽셀을 readbackPixel 버퍼로 복사
-  encoder.copyTextureToBuffer(
-    {
-      texture: pickingContext.getCurrentTexture(),
-      origin: { x: currentX, y: currentY },
-    },
-    { buffer: readbackPixel, bytesPerRow: 256 }, // bytesPerRow는 256의 배수여야 함
-    { width: 1, height: 1 }
-  );
-
-  pickingDevice.queue.submit([encoder.finish()]);
-  await pickingDevice.queue.onSubmittedWorkDone();
-
-  // 결과 읽기
-  await readbackPixel.mapAsync(GPUMapMode.READ);
-  const d = new Uint8Array(readbackPixel.getMappedRange());
-  const [x, y, z] = [d[0], d[1], d[2]]; // RGBA 중 RGB 값만 사용
-  readbackPixel.unmap();
-
-  const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
-  currentPoint = isCubeSelected ? [x, y, z] : undefined;
-
-  // 선택된 큐브 객체 업데이트
-  if (currentPoint) {
-    const index =
-      currentPoint[0] * pointNumber * pointNumber +
-      currentPoint[1] * pointNumber +
-      currentPoint[2];
-    selectedCube = cubes[index];
-  } else {
-    selectedCube = undefined;
-  }
-
-  isPicking = false; // 피킹 완료
 }
 
 // 디버깅용 렌더링 함수
@@ -252,52 +436,22 @@ function renderPickingForDebug() {
 
 // --- View-Projection 행렬 계산 함수 ---
 
-function getViewProjection(): Mat4 {
-  const target = [0, 0, 0];
-  const up = [0, 1, 0];
-  const eye = vec3.create();
-
-  // yaw와 pitch를 이용해 구면 좌표계(Spherical Coordinates)에서 카메라 위치 계산
-  eye[0] = distance * Math.cos(pitch) * Math.sin(yaw);
-  eye[1] = distance * Math.sin(pitch);
-  eye[2] = distance * Math.cos(pitch) * Math.cos(yaw);
-
-  // View 행렬 생성
+function getViewProjection(): [Mat4, Mat4, Vec3] {
+  const target = [0, 0, 0] as Vec3,
+    up = [0, 1, 0] as Vec3;
+  const eye = vec3.create(
+    distance * Math.cos(pitch) * Math.sin(yaw),
+    distance * Math.sin(pitch),
+    distance * Math.cos(pitch) * Math.cos(yaw)
+  );
   const view = mat4.lookAt(eye, target, up);
-
-  // Projection 행렬 생성
   const proj = mat4.perspective(
     (45 * Math.PI) / 180,
     canvas.width / canvas.height,
     0.1,
     100
   );
-
-  // View와 Projection 행렬을 곱하여 반환
-  return mat4.mul(proj, view);
-}
-
-const gap = 0.8;
-const pointNumber = 4;
-
-// WebGL Points/Lines 대체: 내부에서 점 격자 생성
-const pointsInfo: Array<{
-  position: [number, number, number];
-  index: [number, number, number];
-}> = [];
-for (let x = 0; x < pointNumber; x++) {
-  for (let y = 0; y < pointNumber; y++) {
-    for (let z = 0; z < pointNumber; z++) {
-      pointsInfo.push({
-        position: [
-          (x - (pointNumber - 1) / 2) * gap,
-          (y - (pointNumber - 1) / 2) * gap,
-          (z - (pointNumber - 1) / 2) * gap,
-        ],
-        index: [x, y, z],
-      });
-    }
-  }
+  return [view, proj, eye];
 }
 
 // ===== Shared uniform buffers =====
@@ -314,13 +468,129 @@ const pickingVpBuffer = pickingDevice.createBuffer({
 // ===== Depth textures =====
 let depthMain = device.createTexture({
   size: { width: canvas.width, height: canvas.height },
-  format: "depth24plus",
+  format: "depth32float",
   usage: GPUTextureUsage.RENDER_ATTACHMENT,
 });
 let depthPick = pickingDevice.createTexture({
   size: { width: pickingCanvas.width, height: pickingCanvas.height },
-  format: "depth24plus",
+  format: "depth32float",
   usage: GPUTextureUsage.RENDER_ATTACHMENT,
+});
+
+// ===== 씬 데이터 및 WebGPU 리소스 =====
+const gap = 0.8;
+const pointNumber = 4;
+const pointsInfo: Array<{
+  position: [number, number, number];
+  index: [number, number, number];
+}> = [];
+for (let z = 0; z < pointNumber; z++) {
+  for (let y = 0; y < pointNumber; y++) {
+    for (let x = 0; x < pointNumber; x++) {
+      pointsInfo.push({
+        position: [
+          (x - (pointNumber - 1) / 2) * gap,
+          (y - (pointNumber - 1) / 2) * gap,
+          (z - (pointNumber - 1) / 2) * gap,
+        ],
+        index: [x, y, z],
+      });
+    }
+  }
+}
+// 드롭다운 메뉴 채우기
+cubeSelector.innerHTML = '<option value="none">None</option>';
+pointsInfo.forEach((p) => {
+  const option = document.createElement("option");
+  option.value = p.index.join(",");
+  option.textContent = `[${p.index.join(", ")}]`;
+  cubeSelector.appendChild(option);
+});
+
+// 조명 및 그림자 관련 리소스
+const SHADOW_MAP_SIZE = 1024;
+const shadowDepthTexture = device.createTexture({
+  size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  format: "depth32float",
+});
+const shadowDepthView = shadowDepthTexture.createView();
+
+const shadowSampler = device.createSampler({
+  compare: "less",
+});
+
+// Scene Uniform Buffer (카메라, 조명 등)
+const sceneUniformBuffer = device.createBuffer({
+  size: 16 * 4 + 16 * 4 + 4 * 4 + 4 * 4, // 2*mat4 + 2*vec3 (vec4로 패딩)
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+
+const lightUniformBuffer = device.createBuffer({
+  size: 16 * 4, // mat4
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+
+// 바인드 그룹 레이아웃
+const sceneBindGroupLayout = device.createBindGroupLayout({
+  entries: [
+    {
+      binding: 0,
+      visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+      buffer: {},
+    },
+    {
+      binding: 1,
+      visibility: GPUShaderStage.FRAGMENT,
+      texture: { sampleType: "depth" },
+    },
+    {
+      binding: 2,
+      visibility: GPUShaderStage.FRAGMENT,
+      sampler: { type: "comparison" },
+    },
+  ],
+});
+const depthBindGroupLayout = device.createBindGroupLayout({
+  entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }],
+});
+
+// 피킹용 바인드 그룹 레이아웃 추가 (pickingDevice로 생성)
+const pickingSceneBindGroupLayout = pickingDevice.createBindGroupLayout({
+  entries: [
+    {
+      binding: 0,
+      visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+      buffer: {},
+    },
+    {
+      binding: 1,
+      visibility: GPUShaderStage.FRAGMENT,
+      texture: { sampleType: "depth" },
+    },
+    {
+      binding: 2,
+      visibility: GPUShaderStage.FRAGMENT,
+      sampler: { type: "comparison" },
+    },
+  ],
+});
+const pickingDepthBindGroupLayout = pickingDevice.createBindGroupLayout({
+  entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }],
+});
+
+// 바인드 그룹
+const sceneBindGroup = device.createBindGroup({
+  layout: sceneBindGroupLayout,
+  entries: [
+    { binding: 0, resource: { buffer: sceneUniformBuffer } },
+    { binding: 1, resource: shadowDepthView },
+    { binding: 2, resource: shadowSampler },
+  ],
+});
+const lightBindGroup = device.createBindGroup({
+  layout: depthBindGroupLayout,
+  entries: [{ binding: 0, resource: { buffer: lightUniformBuffer } }],
 });
 
 // ===== Cubes (draw + picking) =====
@@ -338,51 +608,71 @@ for (const p of pointsInfo) {
     p.index[2] / 255,
   ];
   cubes.push(
-    new Cube(device, format, p.position, gap * 0.1, normalColor, vpBuffer)
+    new Cube(
+      device,
+      format,
+      sceneBindGroupLayout,
+      depthBindGroupLayout,
+      p.position,
+      gap * 0.1,
+      normalColor,
+      sceneUniformBuffer
+    )
   );
   pickingCubes.push(
     new Cube(
       pickingDevice,
       pickingFormat,
+      pickingSceneBindGroupLayout,
+      pickingDepthBindGroupLayout,
       p.position,
       gap * 0.1,
-      pickColor,
-      pickingVpBuffer,
-      /* picking */ true
+      normalColor
     )
   );
 }
 
 // ===== Lines (draw only) =====
-const lines = new Lines(device, format, new Points(pointNumber, gap), vpBuffer);
+const lines = new Lines(device, format, cubes, pointNumber, sceneUniformBuffer);
 
 let model: Model | undefined;
 let pickingModel: Model | undefined;
 const loader = new GLTFLoader();
 loader.load("./sphere.glb", (gltf) => {
   const mesh = gltf.scene.getObjectByProperty("type", "Mesh") as Mesh;
-  const geometry = mesh.geometry;
-  const positionAttribute = geometry.getAttribute("position");
-  const indexAttribute = geometry.getIndex();
-  if (indexAttribute === null) {
-    throw new Error("Index attribute is required for model rendering");
+  const geo = mesh.geometry;
+  const pos = geo.getAttribute("position").array as Float32Array;
+  const norm = geo.getAttribute("normal").array as Float32Array;
+  const ind = geo.getIndex()!.array as Uint16Array;
+
+  // 위치와 법선을 인터리브 데이터로 합침
+  const vertices = new Float32Array(pos.length + norm.length);
+  for (let i = 0; i < pos.length / 3; i++) {
+    vertices[i * 6 + 0] = pos[i * 3 + 0];
+    vertices[i * 6 + 1] = pos[i * 3 + 1];
+    vertices[i * 6 + 2] = pos[i * 3 + 2];
+    vertices[i * 6 + 3] = norm[i * 3 + 0];
+    vertices[i * 6 + 4] = norm[i * 3 + 1];
+    vertices[i * 6 + 5] = norm[i * 3 + 2];
   }
 
-  const positions = positionAttribute.array;
-  const indices = indexAttribute?.array;
   model = new Model(
     device,
     format,
-    new Float32Array(positions),
-    new Uint16Array(indices),
-    vpBuffer
+    sceneBindGroupLayout,
+    depthBindGroupLayout,
+    vertices,
+    ind,
+    sceneUniformBuffer
   );
-  pickingModel = new Model(
+  model = new Model(
     pickingDevice,
     pickingFormat,
-    new Float32Array(positions),
-    new Uint16Array(indices),
-    pickingVpBuffer
+    sceneBindGroupLayout,
+    depthBindGroupLayout,
+    vertices,
+    ind,
+    sceneUniformBuffer
   );
 });
 
@@ -399,7 +689,7 @@ function ensureDepths() {
     depthMain.destroy();
     depthMain = device.createTexture({
       size: { width: canvas.width, height: canvas.height },
-      format: "depth24plus",
+      format: "depth32float",
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
   }
@@ -411,25 +701,16 @@ function ensureDepths() {
     depthPick.destroy();
     depthPick = pickingDevice.createTexture({
       size: { width: pickingCanvas.width, height: pickingCanvas.height },
-      format: "depth24plus",
+      format: "depth32float",
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
   }
 }
 
 function render() {
-  // 현재 선택된 큐브(currentPoint)가 이전에 로그한 큐브(lastLoggedPoint)와 다를 때만 실행
-  // JSON.stringify는 간단하게 배열의 내용까지 비교하기 위해 사용합니다.
-  if (JSON.stringify(currentPoint) !== JSON.stringify(lastLoggedPoint)) {
-    if (currentPoint) {
-      // 선택된 큐브가 있으면 해당 인덱스를 콘솔에 출력
-      console.log(`✅ Cube hovered at index: [${currentPoint.join(", ")}]`);
-    } else {
-      // 선택된 큐브가 없으면(마우스가 빈 공간에 있으면) 메시지 출력
-      console.log("💨 No cube hovered.");
-    }
-    // 마지막으로 로그한 상태를 현재 상태로 업데이트
-    lastLoggedPoint = currentPoint;
+  if (currentPoint && selectedCube) {
+    console.log(currentPoint);
+    console.log(selectedCube);
   }
 
   renderPickingForDebug();
@@ -461,19 +742,20 @@ function render() {
       depthLoadOp: "clear",
       depthStoreOp: "store",
     },
-  });
+  }); // --- 체크박스 상태에 따라 조건부로 렌더링 ---
 
-  // Lines.render(context, vp) 대체: 라인은 별도 파이프라인 필요. (여기서는 생략)
-  // === Lines 그리기 추가 ===
-  lines.encode(pass);
-
-  // 큐브 렌더링
-  for (const cube of cubes) {
-    cube.encode(pass);
+  if (showModel && model) {
+    model.encode(pass);
   }
 
-  if (model) {
-    model.encode(pass);
+  if (showLines) {
+    lines.encode(pass);
+  }
+
+  if (showCubes) {
+    for (const cube of cubes) {
+      cube.encode(pass);
+    }
   }
 
   // 모델 렌더링(간단 예시 — Cube 파이프라인과 동일 포맷을 쓰려면 전용 파이프라인을 만들어야 함)
@@ -484,63 +766,6 @@ function render() {
   requestAnimationFrame(render);
 }
 
-// async function renderPicking() {
-// 	const vp = getViewProjection();
-// 	pickingDevice.queue.writeBuffer(pickingVpBuffer, 0, vp as unknown as ArrayBuffer);
-
-// 	const encoder = pickingDevice.createCommandEncoder();
-// 	const view = pickingContext.getCurrentTexture().createView();
-
-// 	const pass = encoder.beginRenderPass({
-// 		colorAttachments: [
-// 			{
-// 				view, clearValue: {
-// 					r: 1, g: 1, b: 1, a: 1,
-// 				}, loadOp: 'clear', storeOp: 'store',
-// 			},
-// 		],
-// 		depthStencilAttachment: {
-// 			view: depthPick.createView(),
-// 			depthClearValue: 1,
-// 			depthLoadOp: 'clear',
-// 			depthStoreOp: 'store',
-// 		},
-// 	});
-
-// 	for (const cube of pickingCubes) {
-// 		cube.encode(pass);
-// 	}
-
-// 	if (pickingModel) {
-// 		pickingModel.encode(pass);
-// 	}
-
-// 	pass.end();
-
-// 	if (currentX >= 0 && currentY >= 0) {
-// 		// 현재 프레임 버퍼에서 (x,y) 1픽셀을 readbackPixel로 복사
-// 		encoder.copyTextureToBuffer(
-// 			{texture: pickingContext.getCurrentTexture(), origin: {x: currentX, y: currentY}},
-// 			{buffer: readbackPixel, bytesPerRow: 4},
-// 			{width: 1, height: 1},
-// 		);
-// 	}
-
-// 	pickingDevice.queue.submit([encoder.finish()]);
-
-// 	// 결과 읽기
-// 	if (currentX >= 0 && currentY >= 0) {
-// 		await readbackPixel.mapAsync(GPUMapMode.READ).then(() => {
-// 			const d = new Uint8Array(readbackPixel.getMappedRange());
-// 			const [x, y, z] = [d[0], d[1], d[2]];
-// 			readbackPixel.unmap();
-// 			const isCubeSelected = x < pointNumber && y < pointNumber && z < pointNumber;
-// 			currentPoint = isCubeSelected ? (vec3n.create(x, y, z) as unknown as number[]) : undefined;
-// 		});
-// 	}
-
-// 	requestAnimationFrame(renderPicking);
-// }
-
 render();
-// await renderPicking();
+updateCubeAppearances(); // 초기 투명도 설정
+updateSelectionInfo(); // 초기 인덱스 정보 설정

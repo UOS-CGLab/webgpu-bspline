@@ -1,9 +1,8 @@
-import { type Mat4 } from "wgpu-matrix";
-import type Points from "./points.js";
+import type Cube from "./cube";
 
-type LineInfo = {
-  from: number[];
-  to: number[];
+type LineConnection = {
+  fromIndex: number;
+  toIndex: number;
 };
 
 export default class Lines {
@@ -12,75 +11,60 @@ export default class Lines {
   private readonly vb: GPUBuffer;
   private readonly vertexCount: number;
 
+  // <<-- 선의 연결 정보를 저장할 멤버 변수 추가
+  private readonly lineConnections: LineConnection[] = [];
+  private readonly pointNumber: number;
+
   constructor(
     public device: GPUDevice,
     format: GPUTextureFormat,
-    point: Points,
+    // <<-- 파라미터를 Points 객체 대신 cubes 배열과 pointNumber로 변경
+    cubes: Cube[],
+    pointNumber: number,
     vpBuffer: GPUBuffer
   ) {
-    const info: LineInfo[] = [];
+    this.pointNumber = pointNumber;
 
-    // 격자에서 선 정보 만들기
-    const addLineInfo = (x: number, y: number, z: number) => {
-      const currentPoint = point.getPoint([x, y, z]);
-      if (!currentPoint) {
-        return;
-      }
+    // 격자 구조를 기반으로 어떤 큐브와 어떤 큐브가 연결되는지 인덱스만 저장
+    for (let x = 0; x < this.pointNumber; x++) {
+      for (let y = 0; y < this.pointNumber; y++) {
+        for (let z = 0; z < this.pointNumber; z++) {
+          const fromIndex =
+            x * this.pointNumber * this.pointNumber + y * this.pointNumber + z;
 
-      if (x + 1 < point.pointNumber) {
-        const to = point.getPoint([x + 1, y, z]);
-        if (to) {
-          info.push({ from: currentPoint.index, to: to.index });
-        }
-      }
-
-      if (y + 1 < point.pointNumber) {
-        const to = point.getPoint([x, y + 1, z]);
-        if (to) {
-          info.push({ from: currentPoint.index, to: to.index });
-        }
-      }
-
-      if (z + 1 < point.pointNumber) {
-        const to = point.getPoint([x, y, z + 1]);
-        if (to) {
-          info.push({ from: currentPoint.index, to: to.index });
-        }
-      }
-    };
-
-    for (let x = 0; x < point.pointNumber; x++) {
-      for (let y = 0; y < point.pointNumber; y++) {
-        for (let z = 0; z < point.pointNumber; z++) {
-          addLineInfo(x, y, z);
+          if (x + 1 < this.pointNumber) {
+            const toIndex =
+              (x + 1) * this.pointNumber * this.pointNumber +
+              y * this.pointNumber +
+              z;
+            this.lineConnections.push({ fromIndex, toIndex });
+          }
+          if (y + 1 < this.pointNumber) {
+            const toIndex =
+              x * this.pointNumber * this.pointNumber +
+              (y + 1) * this.pointNumber +
+              z;
+            this.lineConnections.push({ fromIndex, toIndex });
+          }
+          if (z + 1 < this.pointNumber) {
+            const toIndex =
+              x * this.pointNumber * this.pointNumber +
+              y * this.pointNumber +
+              (z + 1);
+            this.lineConnections.push({ fromIndex, toIndex });
+          }
         }
       }
     }
 
-    // Vertex 배열 만들기
-    const vertices: number[] = [];
-    for (const line of info) {
-      const fromPoint = point.getPoint(line.from);
-      const toPoint = point.getPoint(line.to);
-      if (fromPoint && toPoint) {
-        vertices.push(
-          fromPoint.position[0],
-          fromPoint.position[1],
-          fromPoint.position[2],
-          toPoint.position[0],
-          toPoint.position[1],
-          toPoint.position[2]
-        );
-      }
-    }
-
-    this.vertexCount = vertices.length / 3;
-    const vertexData = new Float32Array(vertices);
+    // 초기 Vertex 배열 만들기 (생성 시점의 큐브 위치 기반)
+    const initialVertices = this.buildVertexArray(cubes);
+    this.vertexCount = initialVertices.length / 3;
+    const vertexData = new Float32Array(initialVertices);
 
     // Vertex buffer
     this.vb = device.createBuffer({
       size: vertexData.byteLength,
-      // eslint-disable-next-line no-bitwise
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(this.vb, 0, vertexData);
@@ -109,8 +93,8 @@ export default class Lines {
         topology: "line-list",
       },
       depthStencil: {
-        format: "depth24plus",
-        depthWriteEnabled: true,
+        format: "depth32float",
+        depthWriteEnabled: false,
         depthCompare: "less",
       },
     });
@@ -121,6 +105,28 @@ export default class Lines {
       layout,
       entries: [{ binding: 0, resource: { buffer: vpBuffer } }],
     });
+  }
+
+  // <<-- 현재 큐브 위치를 기반으로 버텍스 배열을 만드는 헬퍼 함수
+  private buildVertexArray(cubes: Cube[]): number[] {
+    const vertices: number[] = [];
+    for (const connection of this.lineConnections) {
+      const fromCube = cubes[connection.fromIndex];
+      const toCube = cubes[connection.toIndex];
+      if (fromCube && toCube) {
+        vertices.push(...fromCube.position, ...toCube.position);
+      }
+    }
+    return vertices;
+  }
+
+  // <<-- 큐브 위치가 변경되었을 때 호출할 업데이트 메서드 추가
+  public updateVertices(cubes: Cube[]) {
+    const updatedVertices = this.buildVertexArray(cubes);
+    const vertexData = new Float32Array(updatedVertices);
+
+    // GPU 버퍼의 내용을 새로운 버텍스 데이터로 덮어씁니다.
+    this.device.queue.writeBuffer(this.vb, 0, vertexData);
   }
 
   encode(pass: GPURenderPassEncoder) {
